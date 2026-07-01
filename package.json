@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-reservas-bot",
+  "version": "1.0.0",
+  "description": "Chatbot de WhatsApp (Cloud API) para tomar reservas de mesa en un restaurante",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "luxon": "^3.5.0"
+  }
+}
