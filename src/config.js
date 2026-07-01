@@ -6,6 +6,7 @@ function clean(value) {
 
 module.exports = {
   port: process.env.PORT || 3000,
+  provider: process.env.WHATSAPP_PROVIDER || 'meta', // 'meta' (oficial) o 'baileys' (no oficial, vía QR)
   metaToken: clean(process.env.META_TOKEN),
   phoneNumberId: clean(process.env.PHONE_NUMBER_ID),
   verifyToken: clean(process.env.VERIFY_TOKEN),

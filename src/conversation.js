@@ -1,7 +1,7 @@
 const { DateTime } = require('luxon');
 const config = require('./config');
 const db = require('./db');
-const wa = require('./whatsapp');
+const wa = require('./wa');
 const { parseDate, parseTimeCandidates, getSlotsForDate, normalize } = require('./dateParser');
 
 const STEP = {
@@ -14,9 +14,7 @@ const STEP = {
   CANCEL_SELECT: 'CANCEL_SELECT',
 };
 
-async function handleIncoming(from, message) {
-  const text = extractText(message);
-  const buttonId = extractButtonId(message);
+async function handleIncoming(from, text, buttonId) {
   const normText = normalize(text);
   const session = (await db.getSession(from)) || { step: STEP.IDLE, data: {} };
 
@@ -256,27 +254,6 @@ async function handleCancelSelect(from, buttonId) {
   } else {
     await wa.sendText(from, 'No pude cancelar esa reserva.');
   }
-}
-
-function extractText(message) {
-  if (message.type === 'text') return message.text.body;
-  if (message.type === 'interactive' && message.interactive.type === 'button_reply') {
-    return message.interactive.button_reply.title;
-  }
-  if (message.type === 'interactive' && message.interactive.type === 'list_reply') {
-    return message.interactive.list_reply.title;
-  }
-  return '';
-}
-
-function extractButtonId(message) {
-  if (message.type === 'interactive' && message.interactive.type === 'button_reply') {
-    return message.interactive.button_reply.id;
-  }
-  if (message.type === 'interactive' && message.interactive.type === 'list_reply') {
-    return message.interactive.list_reply.id;
-  }
-  return null;
 }
 
 module.exports = { handleIncoming };
