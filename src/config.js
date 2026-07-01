@@ -1,13 +1,17 @@
 require('dotenv').config();
 
+function clean(value) {
+  return value ? value.trim() : value;
+}
+
 module.exports = {
   port: process.env.PORT || 3000,
-  metaToken: process.env.META_TOKEN,
-  phoneNumberId: process.env.PHONE_NUMBER_ID,
-  verifyToken: process.env.VERIFY_TOKEN,
-  adminPhone: process.env.ADMIN_PHONE || null,
-  tursoUrl: process.env.TURSO_DATABASE_URL,
-  tursoAuthToken: process.env.TURSO_AUTH_TOKEN,
+  metaToken: clean(process.env.META_TOKEN),
+  phoneNumberId: clean(process.env.PHONE_NUMBER_ID),
+  verifyToken: clean(process.env.VERIFY_TOKEN),
+  adminPhone: clean(process.env.ADMIN_PHONE) || null,
+  tursoUrl: clean(process.env.TURSO_DATABASE_URL),
+  tursoAuthToken: clean(process.env.TURSO_AUTH_TOKEN),
 
   // Personaliza aquí los datos de tu restaurante
   restaurant: {

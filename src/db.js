@@ -31,7 +31,10 @@ const ready = client.batch(
     )`,
   ],
   'write'
-);
+).catch((err) => {
+  console.error('Error inicializando la base de datos en Turso:', err.message);
+  throw err;
+});
 
 module.exports = {
   ready,

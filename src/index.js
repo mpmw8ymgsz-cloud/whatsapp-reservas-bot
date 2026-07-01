@@ -3,6 +3,13 @@ const config = require('./config');
 const wa = require('./whatsapp');
 const { handleIncoming } = require('./conversation');
 
+process.on('unhandledRejection', (err) => {
+  console.error('Promesa no controlada:', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Excepción no controlada:', err);
+});
+
 const app = express();
 app.use(express.json());
 
