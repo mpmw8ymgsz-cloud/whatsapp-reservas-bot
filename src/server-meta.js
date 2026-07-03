@@ -42,16 +42,23 @@ function start(onMessage) {
   app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
 
+    console.log('[webhook] POST recibido:', JSON.stringify(req.body));
+
     try {
       const value = req.body.entry?.[0]?.changes?.[0]?.value;
       const message = value?.messages?.[0];
-      if (!message) return;
+      if (!message) {
+        console.log('[webhook] Sin campo messages (probablemente una notificación de status), ignorado');
+        return;
+      }
 
       const from = message.from;
+      console.log(`[webhook] Mensaje de ${from}, tipo ${message.type}`);
       wa.markRead(message.id).catch((err) => console.error('Error marcando como leído:', err.message));
       await onMessage(from, extractText(message), extractButtonId(message));
+      console.log(`[webhook] Procesado y respondido a ${from}`);
     } catch (err) {
-      console.error('Error procesando webhook:', err);
+      console.error('Error procesando webhook:', err?.response?.data || err);
     }
   });
 

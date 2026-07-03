@@ -11,18 +11,29 @@ function client() {
   });
 }
 
+async function send(payload, label) {
+  try {
+    const { data } = await client().post('', payload);
+    console.log(`[send:${label}] OK ->`, JSON.stringify(data));
+    return data;
+  } catch (err) {
+    console.error(`[send:${label}] ERROR ->`, JSON.stringify(err?.response?.data || err.message));
+    throw err;
+  }
+}
+
 async function sendText(to, body) {
-  await client().post('', {
+  await send({
     messaging_product: 'whatsapp',
     to,
     type: 'text',
     text: { body },
-  });
+  }, 'text');
 }
 
 // buttons: [{ id, title }] - máximo 3 botones, título máx. 20 caracteres
 async function sendButtons(to, bodyText, buttons) {
-  await client().post('', {
+  await send({
     messaging_product: 'whatsapp',
     to,
     type: 'interactive',
@@ -36,12 +47,12 @@ async function sendButtons(to, bodyText, buttons) {
         })),
       },
     },
-  });
+  }, 'buttons');
 }
 
 // rows: [{ id, title, description? }] - máximo 10 filas
 async function sendList(to, bodyText, buttonText, rows) {
-  await client().post('', {
+  await send({
     messaging_product: 'whatsapp',
     to,
     type: 'interactive',
@@ -53,7 +64,7 @@ async function sendList(to, bodyText, buttonText, rows) {
         sections: [{ title: 'Opciones', rows }],
       },
     },
-  });
+  }, 'list');
 }
 
 async function markRead(messageId) {
