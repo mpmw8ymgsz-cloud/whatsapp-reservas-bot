@@ -68,6 +68,9 @@ const ready = (async () => {
     name TEXT,
     updated_at TEXT NOT NULL
   )`);
+  // Migraciones sobre tablas ya existentes (ignorar error si la columna ya existe)
+  try { await execute(`ALTER TABLE reservations ADD COLUMN type TEXT DEFAULT 'restaurante'`); } catch (e) {}
+  try { await execute(`ALTER TABLE reservations ADD COLUMN details TEXT`); } catch (e) {}
 })().catch((err) => {
   console.error('Error inicializando la base de datos en Turso:', err.message);
   throw err;
@@ -98,21 +101,21 @@ module.exports = {
     await execute('DELETE FROM sessions WHERE phone = ?', [phone]);
   },
 
-  async countReservations(date, time) {
+  async countReservations(date, time, type) {
     await ready;
     const result = await execute(
-      `SELECT COUNT(*) as c FROM reservations WHERE date = ? AND time = ? AND status = 'confirmed'`,
-      [date, time]
+      `SELECT COUNT(*) as c FROM reservations WHERE date = ? AND time = ? AND type = ? AND status = 'confirmed'`,
+      [date, time, type]
     );
     return Number(rowsToObjects(result)[0].c);
   },
 
-  async createReservation({ phone, name, partySize, date, time }) {
+  async createReservation({ phone, name, partySize, date, time, type, details }) {
     await ready;
     const result = await execute(
-      `INSERT INTO reservations (phone, name, party_size, date, time, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'confirmed', ?)`,
-      [phone, name, partySize, date, time, new Date().toISOString()]
+      `INSERT INTO reservations (phone, name, party_size, date, time, type, details, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`,
+      [phone, name, partySize, date, time, type || 'restaurante', details || null, new Date().toISOString()]
     );
     return Number(result.last_insert_rowid);
   },
