@@ -120,6 +120,15 @@ module.exports = {
     return Number(result.last_insert_rowid);
   },
 
+  async getReservationsByDateRange(fromDate, toDate) {
+    await ready;
+    const result = await execute(
+      `SELECT * FROM reservations WHERE status = 'confirmed' AND date >= ? AND date <= ? ORDER BY date, time`,
+      [fromDate, toDate]
+    );
+    return rowsToObjects(result);
+  },
+
   async getUpcomingReservations(phone) {
     await ready;
     const today = new Date().toISOString().slice(0, 10);

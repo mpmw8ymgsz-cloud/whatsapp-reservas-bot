@@ -30,6 +30,14 @@ function expLabel(type) {
 
 async function handleIncoming(from, text, buttonId) {
   const normText = normalize(text);
+
+  // Comandos de administrador (solo desde el número del negocio)
+  if (config.adminPhone && from === config.adminPhone) {
+    if (['hoy', 'reservas hoy'].includes(normText)) return sendAdminList(from, 0);
+    if (['manana', 'reservas manana'].includes(normText)) return sendAdminList(from, 1);
+    if (['semana', 'reservas semana'].includes(normText)) return sendAdminList(from, 7);
+  }
+
   const session = (await db.getSession(from)) || { step: STEP.IDLE, data: {} };
 
   // Comandos globales, disponibles en cualquier punto
@@ -372,6 +380,34 @@ async function handleConfirmStep(from, buttonId, session, text) {
   }
 
   return wa.sendText(from, 'Responde "Confirmar" o "Cancelar", por favor.');
+}
+
+// ---------- Comandos de administrador ----------
+
+async function sendAdminList(from, daysAhead) {
+  const zone = B.timezone;
+  const start = DateTime.now().setZone(zone).startOf('day');
+  const end = daysAhead === 7 ? start.plus({ days: 7 }) : start.plus({ days: daysAhead });
+  const fromDate = (daysAhead === 1 ? start.plus({ days: 1 }) : start).toFormat('yyyy-MM-dd');
+  const toDate = end.toFormat('yyyy-MM-dd');
+
+  const list = await db.getReservationsByDateRange(fromDate, toDate);
+  if (list.length === 0) {
+    return wa.sendText(from, `📋 Sin reservas entre ${fromDate} y ${toDate}.`);
+  }
+
+  let msg = `📋 *Reservas ${fromDate}${toDate !== fromDate ? ' → ' + toDate : ''}* (${list.length})\n`;
+  let currentDate = '';
+  for (const r of list) {
+    if (r.date !== currentDate) {
+      currentDate = r.date;
+      msg += `\n📅 *${r.date}*\n`;
+    }
+    const icon = r.type === 'otivm' ? '🌿' : r.type === 'hotel' ? '🛏️' : '🍽️';
+    msg += `${icon} #${r.id} ${r.time} · ${r.name}${r.party_size ? ' · ' + r.party_size + 'p' : ''}${r.details ? ' · ' + r.details : ''} · 📱${r.phone}\n`;
+  }
+  msg += `\n_Comandos: "hoy", "mañana", "semana"_`;
+  await wa.sendText(from, msg);
 }
 
 // ---------- Mis reservas / cancelación ----------
