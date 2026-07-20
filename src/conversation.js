@@ -3,6 +3,7 @@ const config = require('./config');
 const db = require('./db');
 const wa = require('./wa');
 const { parseDate, parseTimeCandidates, getSlotsForDate, normalize } = require('./dateParser');
+const hotelApi = require('./hotelApi');
 
 const B = config.business;
 
@@ -13,8 +14,9 @@ const STEP = {
   PARTY: 'PARTY',
   NAME: 'NAME',
   CONFIRM: 'CONFIRM',
-  HOTEL_DATES: 'HOTEL_DATES',
-  HOTEL_PARTY: 'HOTEL_PARTY',
+  HOTEL_ENTRADA: 'HOTEL_ENTRADA',
+  HOTEL_SALIDA: 'HOTEL_SALIDA',
+  HOTEL_PAX: 'HOTEL_PAX',
   CANCEL_SELECT: 'CANCEL_SELECT',
 };
 
@@ -80,10 +82,12 @@ async function handleIncoming(from, text, buttonId) {
       return handleNameStep(from, text, session);
     case STEP.CONFIRM:
       return handleConfirmStep(from, buttonId, session, text);
-    case STEP.HOTEL_DATES:
-      return handleHotelDates(from, text, session);
-    case STEP.HOTEL_PARTY:
-      return handleHotelParty(from, text, session);
+    case STEP.HOTEL_ENTRADA:
+      return handleHotelEntrada(from, text, session);
+    case STEP.HOTEL_SALIDA:
+      return handleHotelSalida(from, text, session);
+    case STEP.HOTEL_PAX:
+      return handleHotelPax(from, text, session);
     case STEP.CANCEL_SELECT:
       return handleCancelSelect(from, buttonId);
     default:
@@ -144,30 +148,52 @@ async function startOtivm(from) {
 // ---------- Flujo hotel ----------
 
 async function startHotel(from) {
-  await db.setSession(from, STEP.HOTEL_DATES, { type: 'hotel' });
+  await db.setSession(from, STEP.HOTEL_ENTRADA, { type: 'hotel' });
   await wa.sendText(
     from,
-    `🛏️ *Hotel ${B.name}*\n\nPuedes reservar al momento con disponibilidad real aquí:\n${B.hotelBookingUrl}\n\n` +
-      `O si prefieres, dime las *fechas de entrada y salida* (ej: "del 15 al 17 de agosto") y aviso a recepción para que te confirmen por aquí sin que tengas que llamar.`
+    `🛏️ *Hotel ${B.name}*\n\n¿Qué día quieres *entrar* (check-in)? (ej: "15/08", "viernes", "mañana")`
   );
 }
 
-async function handleHotelDates(from, text, session) {
-  const t = (text || '').trim();
-  if (!t || t.length < 4) {
-    return wa.sendText(from, 'Dime las fechas de entrada y salida (ej: "del 15 al 17 de agosto").');
+async function handleHotelEntrada(from, text, session) {
+  const zone = B.timezone;
+  const dt = parseDate(text, zone);
+  const now = DateTime.now().setZone(zone).startOf('day');
+  if (!dt) {
+    return wa.sendText(from, 'No entendí la fecha 🤔. Dime el día de entrada (ej: "15/08", "viernes").');
   }
-  session.data.hotelDates = t;
-  await db.setSession(from, STEP.HOTEL_PARTY, session.data);
-  await wa.sendText(from, '¿Para cuántas personas? (puedes indicar también niños, ej: "2 adultos y 1 niño")');
+  if (dt < now) {
+    return wa.sendText(from, 'Esa fecha ya pasó. Dime otra fecha de entrada, por favor.');
+  }
+  session.data.entrada = dt.toFormat('yyyy-MM-dd');
+  session.data.entradaLabel = dt.setLocale('es').toFormat("cccc d 'de' LLLL");
+  await db.setSession(from, STEP.HOTEL_SALIDA, session.data);
+  await wa.sendText(from, `Entrada el ${session.data.entradaLabel}. ¿Y qué día *sales* (check-out)?`);
 }
 
-async function handleHotelParty(from, text, session) {
-  const t = (text || '').trim();
-  if (!t) {
-    return wa.sendText(from, '¿Para cuántas personas sería la estancia?');
+async function handleHotelSalida(from, text, session) {
+  const zone = B.timezone;
+  const dt = parseDate(text, zone);
+  if (!dt) {
+    return wa.sendText(from, 'No entendí la fecha de salida 🤔. Dime el día de check-out (ej: "17/08").');
   }
-  session.data.hotelParty = t;
+  const entrada = DateTime.fromFormat(session.data.entrada, 'yyyy-MM-dd', { zone });
+  if (dt <= entrada) {
+    return wa.sendText(from, 'La salida tiene que ser posterior a la entrada. Dime otra fecha de salida.');
+  }
+  session.data.salida = dt.toFormat('yyyy-MM-dd');
+  session.data.salidaLabel = dt.setLocale('es').toFormat("cccc d 'de' LLLL");
+  session.data.noches = Math.round(dt.diff(entrada, 'days').days);
+  await db.setSession(from, STEP.HOTEL_PAX, session.data);
+  await wa.sendText(from, `${session.data.noches} noche(s). ¿Para cuántas personas?`);
+}
+
+async function handleHotelPax(from, text, session) {
+  const n = parseInt(normalize(text).replace(/[^\d]/g, ''), 10);
+  if (!n || n < 1 || n > 6) {
+    return wa.sendText(from, 'Dime un número válido de personas (1-6). Para grupos mayores, llámanos al 923 37 00 76.');
+  }
+  session.data.pax = n;
 
   const knownName = await db.getCustomerName(from);
   if (knownName) {
@@ -175,7 +201,7 @@ async function handleHotelParty(from, text, session) {
     return goToConfirm(from, session);
   }
   await db.setSession(from, STEP.NAME, session.data);
-  await wa.sendText(from, '¿A nombre de quién hago la solicitud?');
+  await wa.sendText(from, '¿A nombre de quién hago la reserva?');
 }
 
 // ---------- Pasos comunes (fecha/hora/personas/nombre/confirmación) ----------
@@ -294,7 +320,7 @@ async function goToConfirm(from, session) {
 
   let resumen;
   if (d.type === 'hotel') {
-    resumen = `Confirma tu solicitud de *hotel*:\n📅 ${d.hotelDates}\n👥 ${d.hotelParty}\n🙋 ${d.name}\n\nRecepción te confirmará disponibilidad por aquí. ¿Envío la solicitud?`;
+    resumen = `Confirma tu reserva de *hotel*:\n📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s)\n👥 ${d.pax} personas\n🙋 ${d.name}\n\n¿Confirmo la reserva?`;
   } else if (d.type === 'otivm') {
     const total = d.partySize * B.otivm.pricePerPerson;
     resumen = `Confirma tu reserva en *OTIVM*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n💶 ${B.otivm.pricePerPerson}€/persona (${total}€, incluye ${B.otivm.includes})\n\n¿Confirmo?`;
@@ -317,24 +343,64 @@ async function handleConfirmStep(from, buttonId, session, text) {
     const d = session.data;
 
     if (d.type === 'hotel') {
-      const id = await db.createReservation({
+      await db.clearSession(from);
+
+      // 1) Buscar habitación libre y escribir la reserva en el PMS del hotel
+      let pms = { ok: false, msg: 'no procesado' };
+      let habitacion = null;
+      try {
+        habitacion = await hotelApi.findFreeRoom(d.entrada, d.salida, d.pax);
+        if (habitacion) {
+          pms = await hotelApi.createReservation({
+            habitacionId: habitacion,
+            fechaEntrada: d.entrada,
+            fechaSalida: d.salida,
+            nombre: d.name,
+            telefono: from,
+            pax: d.pax,
+            obs: `Reserva por WhatsApp (bot). Tel cliente: ${from}. Pendiente de confirmar.`,
+          });
+        }
+      } catch (err) {
+        console.error('[hotel] Error integrando con el PMS:', err.message);
+        pms = { ok: false, msg: err.message };
+      }
+
+      // 2) Guardar también en nuestra base de datos (respaldo y trazabilidad)
+      const detalles = `Entrada ${d.entrada}, Salida ${d.salida}, ${d.noches} noche(s), ${d.pax} pers.` +
+        (pms.ok ? ` | PMS hab ${habitacion} nº ${pms.id}` : ` | PMS PENDIENTE (${pms.msg})`);
+      const localId = await db.createReservation({
         phone: from,
         name: d.name,
-        partySize: 0,
-        date: DateTime.now().setZone(B.timezone).toFormat('yyyy-MM-dd'),
+        partySize: d.pax,
+        date: d.entrada,
         time: '--:--',
         type: 'hotel',
-        details: `Fechas: ${d.hotelDates} | Personas: ${d.hotelParty}`,
+        details: detalles,
       });
-      await db.clearSession(from);
-      await wa.sendText(
-        from,
-        `¡Solicitud enviada! 🛎️ (nº ${id}) Recepción te escribirá por aquí para confirmar disponibilidad y precio.\n\nSi lo prefieres, también puedes reservar al momento en:\n${B.hotelBookingUrl}`
-      );
+
+      // 3) Responder al cliente y avisar a recepción
+      if (pms.ok) {
+        await wa.sendText(
+          from,
+          `¡Reserva de hotel registrada! 🛎️🎉\n📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s) · 👥 ${d.pax} personas\n\n` +
+            `Queda como *pendiente de confirmar*: recepción revisará la disponibilidad y el precio y te escribirá por aquí. ¡Gracias!`
+        );
+      } else {
+        await wa.sendText(
+          from,
+          `He tomado tu solicitud de hotel 🛏️\n📅 ${d.entradaLabel} → ${d.salidaLabel} · 👥 ${d.pax} personas\n\n` +
+            `Recepción te confirmará la disponibilidad por aquí. También puedes reservar al momento en:\n${B.hotelBookingUrl}`
+        );
+      }
+
       if (config.adminPhone) {
+        const estadoPms = pms.ok
+          ? `✅ Metida en el PMS (hab ${habitacion}, nº ${pms.id}) como PENDIENTE`
+          : `⚠️ NO se pudo meter en el PMS (${pms.msg}) - metela a mano`;
         await wa.sendText(
           config.adminPhone,
-          `🛏️ SOLICITUD HOTEL #${id}\n${d.hotelDates}\n${d.hotelParty}\nNombre: ${d.name}\nTel: ${from}\n\nResponder al cliente por WhatsApp para confirmar.`
+          `🛏️ RESERVA HOTEL (bot) #${localId}\nEntrada: ${d.entrada}\nSalida: ${d.salida}\n${d.noches} noche(s) · ${d.pax} pers.\nNombre: ${d.name}\nTel: ${from}\n\n${estadoPms}`
         );
       }
       return;
