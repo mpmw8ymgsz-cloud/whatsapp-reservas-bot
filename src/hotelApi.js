@@ -77,7 +77,13 @@ async function createReservation({ habitacionId, fechaEntrada, fechaSalida, nomb
       headers: { 'Content-Type': 'application/json' },
       timeout: 15000,
     });
-    return { ok: true, id: data && data.id ? data.id : null, habitacionId };
+    return {
+      ok: true,
+      id: data && data.id ? data.id : null,
+      habitacionId,
+      precioNoche: data ? parseFloat(data.precio_noche) || 0 : 0,
+      precioTotal: data ? parseFloat(data.precio_total) || 0 : 0,
+    };
   } catch (err) {
     if (err.response && err.response.status === 409) {
       return { ok: false, msg: (err.response.data && err.response.data.msg) || 'Habitación ocupada' };
@@ -86,4 +92,38 @@ async function createReservation({ habitacionId, fechaEntrada, fechaSalida, nomb
   }
 }
 
-module.exports = { getRooms, getReservations, findFreeRoom, createReservation };
+// Pasa una reserva existente a 'confirmada' (el PMS espera el objeto completo en el PUT)
+async function confirmReservation(id) {
+  try {
+    const todas = await getReservations();
+    const res = todas.find((r) => r.id === id);
+    if (!res) return { ok: false, msg: 'Reserva no encontrada en el PMS' };
+    res.estado = 'confirmada';
+    const { data } = await axios.put(`${BASE}/api/reservas/${id}`, res, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, msg: err.message };
+  }
+}
+
+// Elimina una reserva (se usa si el cliente rechaza el precio, para liberar la habitación)
+async function deleteReservation(id) {
+  try {
+    await axios.delete(`${BASE}/api/reservas/${id}`, { timeout: 15000 });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, msg: err.message };
+  }
+}
+
+module.exports = {
+  getRooms,
+  getReservations,
+  findFreeRoom,
+  createReservation,
+  confirmReservation,
+  deleteReservation,
+};

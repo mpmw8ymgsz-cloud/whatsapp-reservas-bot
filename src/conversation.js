@@ -17,6 +17,7 @@ const STEP = {
   HOTEL_ENTRADA: 'HOTEL_ENTRADA',
   HOTEL_SALIDA: 'HOTEL_SALIDA',
   HOTEL_PAX: 'HOTEL_PAX',
+  HOTEL_QUOTE: 'HOTEL_QUOTE',
   CANCEL_SELECT: 'CANCEL_SELECT',
 };
 
@@ -88,6 +89,8 @@ async function handleIncoming(from, text, buttonId) {
       return handleHotelSalida(from, text, session);
     case STEP.HOTEL_PAX:
       return handleHotelPax(from, text, session);
+    case STEP.HOTEL_QUOTE:
+      return handleHotelQuote(from, buttonId, session, text);
     case STEP.CANCEL_SELECT:
       return handleCancelSelect(from, buttonId);
     default:
@@ -198,10 +201,128 @@ async function handleHotelPax(from, text, session) {
   const knownName = await db.getCustomerName(from);
   if (knownName) {
     session.data.name = knownName;
-    return goToConfirm(from, session);
+    return quoteHotel(from, session);
   }
   await db.setSession(from, STEP.NAME, session.data);
   await wa.sendText(from, '¿A nombre de quién hago la reserva?');
+}
+
+// Comprueba disponibilidad real, bloquea la habitacion como 'pendiente' y ofrece el precio
+async function quoteHotel(from, session) {
+  const d = session.data;
+  await wa.sendText(from, 'Un momento, compruebo disponibilidad y precio… ⏳');
+
+  let habitacion = null;
+  try {
+    habitacion = await hotelApi.findFreeRoom(d.entrada, d.salida, d.pax);
+  } catch (err) {
+    console.error('[hotel] Error consultando disponibilidad:', err.message);
+  }
+
+  if (!habitacion) {
+    await db.clearSession(from);
+    await wa.sendText(
+      from,
+      `Lo siento, no nos queda disponibilidad para esas fechas 😔\n📅 ${d.entradaLabel} → ${d.salidaLabel}\n\n` +
+        `Puedes probar con otras fechas escribiendo *hotel*, o llamarnos al ${B.phone} y lo miramos contigo.`
+    );
+    return;
+  }
+
+  const pms = await hotelApi.createReservation({
+    habitacionId: habitacion,
+    fechaEntrada: d.entrada,
+    fechaSalida: d.salida,
+    nombre: d.name,
+    telefono: from,
+    pax: d.pax,
+    obs: `Reserva por WhatsApp (bot). Tel cliente: ${from}. Pendiente de aceptar precio.`,
+  });
+
+  if (!pms.ok) {
+    await db.clearSession(from);
+    await wa.sendText(
+      from,
+      `Ha habido un problema al reservar esas fechas 😔. Llámanos al ${B.phone} y lo solucionamos enseguida.`
+    );
+    if (config.adminPhone) {
+      await wa.sendText(config.adminPhone, `⚠️ Error del bot al crear reserva de hotel (${d.entrada} -> ${d.salida}, ${d.pax}p, ${d.name}, tel ${from}): ${pms.msg}`);
+    }
+    return;
+  }
+
+  session.data.pmsId = pms.id;
+  session.data.habitacion = pms.habitacionId;
+  session.data.precioNoche = pms.precioNoche;
+  session.data.precioTotal = pms.precioTotal;
+  await db.setSession(from, STEP.HOTEL_QUOTE, session.data);
+
+  await wa.sendButtons(
+    from,
+    `¡Tenemos disponibilidad! ✅\n\n` +
+      `📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s)\n👥 ${d.pax} personas\n\n` +
+      `💶 *Precio: ${pms.precioTotal.toFixed(2)}€* en total (${pms.precioNoche.toFixed(2)}€/noche)\n` +
+      `_Solo alojamiento. El pago se realiza a tu llegada al hotel._\n\n` +
+      `¿Confirmo la reserva?`,
+    [
+      { id: 'confirm_yes', title: '✅ Confirmar' },
+      { id: 'confirm_no', title: '❌ No, gracias' },
+    ]
+  );
+}
+
+async function handleHotelQuote(from, buttonId, session, text) {
+  const normText = normalize(text);
+  const isYes = buttonId === 'confirm_yes' || ['si', 'sí', 'vale', 'ok', 'confirmar', 'confirmo', 'acepto'].includes(normText);
+  const isNo = buttonId === 'confirm_no' || ['no', 'cancelar', 'no gracias'].includes(normText);
+  const d = session.data;
+
+  if (isYes) {
+    const conf = await hotelApi.confirmReservation(d.pmsId);
+    await db.clearSession(from);
+
+    const detalles = `Entrada ${d.entrada}, Salida ${d.salida}, ${d.noches} noche(s), ${d.pax} pers. | Hab ${d.habitacion} | ${d.precioTotal} EUR | PMS ${d.pmsId}` +
+      (conf.ok ? '' : ' | AVISO: no se pudo pasar a confirmada');
+    const localId = await db.createReservation({
+      phone: from,
+      name: d.name,
+      partySize: d.pax,
+      date: d.entrada,
+      time: '--:--',
+      type: 'hotel',
+      details: detalles,
+    });
+
+    await wa.sendText(
+      from,
+      `¡Reserva confirmada! 🎉🛏️\n\n` +
+        `📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s) · 👥 ${d.pax} personas\n` +
+        `💶 Total: ${d.precioTotal.toFixed(2)}€ — *se paga a la llegada*\n\n` +
+        `Te esperamos en ${B.name}.\n📍 ${B.address}\n\n_Para cancelar, escribe "mis reservas"._`
+    );
+
+    if (config.adminPhone) {
+      await wa.sendText(
+        config.adminPhone,
+        `🛏️ RESERVA HOTEL CONFIRMADA (bot) #${localId}\n` +
+          `Hab: ${d.habitacion}\nEntrada: ${d.entrada}\nSalida: ${d.salida}\n${d.noches} noche(s) · ${d.pax} pers.\n` +
+          `Cliente: ${d.name}\nTel: ${from}\n💶 ${d.precioTotal.toFixed(2)}€ (paga a la llegada)\n\n` +
+          (conf.ok ? `✅ Confirmada en el PMS (${d.pmsId})` : `⚠️ En el PMS sigue como PENDIENTE (${d.pmsId}) - revisar`)
+      );
+    }
+    return;
+  }
+
+  if (isNo) {
+    await hotelApi.deleteReservation(d.pmsId);
+    await db.clearSession(from);
+    return wa.sendText(
+      from,
+      `Sin problema, he liberado la reserva. 😊\n\nSi quieres probar otras fechas escribe *hotel*, o llámanos al ${B.phone}.`
+    );
+  }
+
+  return wa.sendText(from, 'Responde "Confirmar" si te va bien el precio, o "No, gracias" para cancelar.');
 }
 
 // ---------- Pasos comunes (fecha/hora/personas/nombre/confirmación) ----------
@@ -311,6 +432,7 @@ async function handleNameStep(from, text, session) {
   }
   session.data.name = name;
   await db.upsertCustomerName(from, name);
+  if (session.data.type === 'hotel') return quoteHotel(from, session);
   return goToConfirm(from, session);
 }
 
@@ -319,9 +441,7 @@ async function goToConfirm(from, session) {
   const d = session.data;
 
   let resumen;
-  if (d.type === 'hotel') {
-    resumen = `Confirma tu reserva de *hotel*:\n📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s)\n👥 ${d.pax} personas\n🙋 ${d.name}\n\n¿Confirmo la reserva?`;
-  } else if (d.type === 'otivm') {
+  if (d.type === 'otivm') {
     const total = d.partySize * B.otivm.pricePerPerson;
     resumen = `Confirma tu reserva en *OTIVM*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n💶 ${B.otivm.pricePerPerson}€/persona (${total}€, incluye ${B.otivm.includes})\n\n¿Confirmo?`;
   } else {
@@ -341,70 +461,6 @@ async function handleConfirmStep(from, buttonId, session, text) {
 
   if (isYes) {
     const d = session.data;
-
-    if (d.type === 'hotel') {
-      await db.clearSession(from);
-
-      // 1) Buscar habitación libre y escribir la reserva en el PMS del hotel
-      let pms = { ok: false, msg: 'no procesado' };
-      let habitacion = null;
-      try {
-        habitacion = await hotelApi.findFreeRoom(d.entrada, d.salida, d.pax);
-        if (habitacion) {
-          pms = await hotelApi.createReservation({
-            habitacionId: habitacion,
-            fechaEntrada: d.entrada,
-            fechaSalida: d.salida,
-            nombre: d.name,
-            telefono: from,
-            pax: d.pax,
-            obs: `Reserva por WhatsApp (bot). Tel cliente: ${from}. Pendiente de confirmar.`,
-          });
-        }
-      } catch (err) {
-        console.error('[hotel] Error integrando con el PMS:', err.message);
-        pms = { ok: false, msg: err.message };
-      }
-
-      // 2) Guardar también en nuestra base de datos (respaldo y trazabilidad)
-      const detalles = `Entrada ${d.entrada}, Salida ${d.salida}, ${d.noches} noche(s), ${d.pax} pers.` +
-        (pms.ok ? ` | PMS hab ${habitacion} nº ${pms.id}` : ` | PMS PENDIENTE (${pms.msg})`);
-      const localId = await db.createReservation({
-        phone: from,
-        name: d.name,
-        partySize: d.pax,
-        date: d.entrada,
-        time: '--:--',
-        type: 'hotel',
-        details: detalles,
-      });
-
-      // 3) Responder al cliente y avisar a recepción
-      if (pms.ok) {
-        await wa.sendText(
-          from,
-          `¡Reserva de hotel registrada! 🛎️🎉\n📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s) · 👥 ${d.pax} personas\n\n` +
-            `Queda como *pendiente de confirmar*: recepción revisará la disponibilidad y el precio y te escribirá por aquí. ¡Gracias!`
-        );
-      } else {
-        await wa.sendText(
-          from,
-          `He tomado tu solicitud de hotel 🛏️\n📅 ${d.entradaLabel} → ${d.salidaLabel} · 👥 ${d.pax} personas\n\n` +
-            `Recepción te confirmará la disponibilidad por aquí. También puedes reservar al momento en:\n${B.hotelBookingUrl}`
-        );
-      }
-
-      if (config.adminPhone) {
-        const estadoPms = pms.ok
-          ? `✅ Metida en el PMS (hab ${habitacion}, nº ${pms.id}) como PENDIENTE`
-          : `⚠️ NO se pudo meter en el PMS (${pms.msg}) - metela a mano`;
-        await wa.sendText(
-          config.adminPhone,
-          `🛏️ RESERVA HOTEL (bot) #${localId}\nEntrada: ${d.entrada}\nSalida: ${d.salida}\n${d.noches} noche(s) · ${d.pax} pers.\nNombre: ${d.name}\nTel: ${from}\n\n${estadoPms}`
-        );
-      }
-      return;
-    }
 
     const id = await db.createReservation({
       phone: from,
