@@ -42,25 +42,5 @@ module.exports = {
       },
     },
 
-    // OTIVM: brunch + música + piscina + cóctel/copa. Jueves a domingo, julio-septiembre.
-    otivm: {
-      label: 'OTIVM · Brunch · Pool · Tardeo',
-      pricePerPerson: 35,
-      includes: 'brunch, música, piscina y cóctel o copa',
-      months: [7, 8, 9], // julio, agosto, septiembre
-      slotMinutes: 30,
-      maxReservationsPerSlot: 10,
-      maxPartySize: 15,
-      // Jueves(4) a domingo(0), de 12:00 a 21:00 (última entrada 20:00)
-      schedule: {
-        0: [['12:00', '20:30']],
-        1: null,
-        2: null,
-        3: null,
-        4: [['12:00', '20:30']],
-        5: [['12:00', '20:30']],
-        6: [['12:00', '20:30']],
-      },
-    },
   },
 };

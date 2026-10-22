@@ -110,12 +110,13 @@ module.exports = {
     return Number(rowsToObjects(result)[0].c);
   },
 
-  async createReservation({ phone, name, partySize, date, time, type, details }) {
+  async createReservation({ phone, name, partySize, date, time, type, details, status }) {
     await ready;
+    const statusValue = status === 'pending' ? 'pending' : 'confirmed';
     const result = await execute(
       `INSERT INTO reservations (phone, name, party_size, date, time, type, details, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?)`,
-      [phone, name, partySize, date, time, type || 'restaurante', details || null, new Date().toISOString()]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [phone, name, partySize, date, time, type || 'restaurante', details || null, statusValue, new Date().toISOString()]
     );
     return Number(result.last_insert_rowid);
   },
@@ -133,10 +134,29 @@ module.exports = {
     await ready;
     const today = new Date().toISOString().slice(0, 10);
     const result = await execute(
-      `SELECT * FROM reservations WHERE phone = ? AND status = 'confirmed' AND date >= ? ORDER BY date, time`,
+      `SELECT * FROM reservations
+       WHERE phone = ? AND date >= ?
+         AND (status = 'confirmed' OR (status = 'pending' AND type IN ('evento_empresa', 'evento_congreso')))
+       ORDER BY date, time`,
       [phone, today]
     );
     return rowsToObjects(result);
+  },
+
+  async getPendingEventRequests() {
+    await ready;
+    const result = await execute(
+      `SELECT * FROM reservations
+       WHERE status = 'pending' AND type IN ('evento_empresa', 'evento_congreso')
+       ORDER BY date, time, id`
+    );
+    return rowsToObjects(result);
+  },
+
+  async getReservationById(id, phone) {
+    await ready;
+    const result = await execute('SELECT * FROM reservations WHERE id = ? AND phone = ?', [id, phone]);
+    return rowsToObjects(result)[0] || null;
   },
 
   async cancelReservation(id, phone) {
