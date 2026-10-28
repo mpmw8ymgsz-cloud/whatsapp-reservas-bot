@@ -133,7 +133,7 @@ async function showMenu(from) {
   await db.clearSession(from);
   await wa.sendButtons(
     from,
-    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "mis reservas", "info", "menús de Navidad" o "congreso"._`,
+    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "mis reservas", "info", "comidas de Navidad" o "congreso"._`,
     [
       { id: 'exp_rest', title: '🍽️ Restaurante' },
       { id: 'exp_hotel', title: '🛏️ Hotel' },
@@ -150,7 +150,7 @@ async function sendInfo(from) {
       `🍽️ *Restaurante*: comidas 13:30-15:30 y cenas 20:30-22:30. Cerrado martes y miércoles.\n\n` +
       `🛏️ *Hotel*: reserva online en ${B.hotelBookingUrl} o escríbeme aquí y aviso a recepción.\n\n` +
       `🎉 *Eventos*: congresos y grupos grandes (capacidad total de 500 a 700; terraza acristalada de 10 a 50). ` +
-      `En diciembre, menús de empresa. Escribe *eventos*, *menús de Navidad* o *congreso*.\n\n` +
+      `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. Escribe *eventos* o *congreso*.\n\n` +
       `Escribe *menu* para volver al inicio.`
   );
 }

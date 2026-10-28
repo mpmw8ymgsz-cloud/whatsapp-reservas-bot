@@ -122,9 +122,9 @@ Edita [src/config.js](src/config.js), haz commit y push (Render vuelve a despleg
   resumen y confirmación. Cerrado martes y miércoles.
 - **Hotel**: pregunta entrada, salida y personas, comprueba el PMS y confirma solo si el
   cliente acepta el precio.
-- **Eventos**: menús de empresa de diciembre 2026 (Mediodía, Navidad y Gran Gala) y
-  solicitudes de congreso o evento grande. Esas solicitudes se guardan como
-  *pendientes de presupuesto* (no quedan confirmadas) y salen en `/admin`.
+- **Eventos**: comidas de Navidad para empresas (menú a medida, desde 55 € + IVA por
+  persona, todo diciembre) y solicitudes de congreso o evento grande. Esas solicitudes
+  se guardan como *pendientes de presupuesto* (no quedan confirmadas) y salen en `/admin`.
 - OTIVM no se ofrece: es un espacio de la zona de cocina y está cerrado fuera de temporada.
 - Si la hora pedida en el restaurante no está disponible o está completa, el bot ofrece
   una lista con los horarios libres más cercanos.

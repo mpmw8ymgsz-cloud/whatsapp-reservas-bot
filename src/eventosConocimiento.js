@@ -46,8 +46,8 @@ function congresoIntro(businessName) {
 function answerSideQuestion(norm) {
   if (/vino|bebida|barra libre|cava|copas?/.test(norm)) {
     return (
-      `En el Menú Gran Gala los vinos van incluidos. Qué vinos, y la bebida del Menú Navidad y del Menú Mediodía, se detallan en el presupuesto. ` +
-      `La barra libre también. Todos los precios son + IVA.`
+      'La bebida y la barra libre se detallan en el presupuesto. ' +
+      'Las comidas de Navidad para empresas son un menú a medida, desde 55 € + IVA por persona.'
     );
   }
   if (/dj\b|musica en directo|suplemento/.test(norm)) {
@@ -56,8 +56,11 @@ function answerSideQuestion(norm) {
   if (/alergi|intoleran|celiac|menu infantil|ninos|niños|cancelac|señal|senal|deposito|depósito|anticipo|plazo/.test(norm)) {
     return 'La señal, el plazo para cerrar el número de comensales, el menú infantil, las alergias y la cancelación de grupos se detallan en el presupuesto.';
   }
-  if (/sustit|alternativ|cambiar (el |un )?plato|otro plato|plato de reserva/.test(norm)) {
-    return require('./menusEmpresa').sustitucionesText();
+  if (/sustit|alternativ|cambiar (el |un )?plato|otro plato|plato de reserva|que incluye|que lleva|que tiene|platos|carta|detalle|gran gala|mediodia|menu navidad/.test(norm)) {
+    return (
+      'Las comidas de Navidad para empresas son un menú a medida, desde 55 € + IVA por persona. ' +
+      'Los platos los propone el equipo en el presupuesto.'
+    );
   }
   if (/habitacion|alojamiento|dormir|tarifa de grupo|tarifa grupo|pernoct/.test(norm)) {
     return `Hay ${HABITACIONES} por si el grupo se queda. La tarifa de grupo y las condiciones se detallan en el presupuesto.`;
@@ -79,11 +82,8 @@ function answerSideQuestion(norm) {
   }
   if (/\biva\b|precio|cuanto cuesta|cuánto cuesta|tarifas?/.test(norm)) {
     return (
-      `Todos los precios son + IVA.\n` +
-      `• Menú Mediodía: precio a consultar (+ IVA).\n` +
-      `• Menú Navidad: 65 € + IVA por persona.\n` +
-      `• Menú Gran Gala: 110 € + IVA por persona, vinos incluidos.\n` +
-      `Un congreso o un evento grande se presupuesta aparte: no tengo una tarifa cerrada de salas.`
+      'Las comidas de Navidad para empresas son un menú a medida, desde 55 € + IVA por persona.\n' +
+      'Un congreso o un evento grande se presupuesta aparte: no tengo una tarifa cerrada de salas.'
     );
   }
   return null;

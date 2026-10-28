@@ -35,11 +35,7 @@ function stampId(replies, id) {
 function classifyIncoming(norm) {
   if (!norm) return null;
   if (conocimiento.isCongresoTopic(norm)) return { kind: 'congreso' };
-  if (menus.isEmpresaTopic(norm)) {
-    const menuId = menus.explicitMenuDetail(norm);
-    if (menuId) return { kind: 'empresa_detail', menuId };
-    return { kind: 'empresa_overview' };
-  }
+  if (menus.isEmpresaTopic(norm)) return { kind: 'empresa_overview' };
   if (conocimiento.isHubTopic(norm)) return { kind: 'hub' };
   return null;
 }
@@ -55,16 +51,7 @@ function base(flow, stage, extra) {
 function startOverview(business) {
   return {
     data: base('empresa', 'browse'),
-    replies: [buttons(menus.overviewText(business.name), menus.OVERVIEW_BUTTONS)],
-  };
-}
-
-function startDetail(business, menuId) {
-  const body = menus.detailText(menuId);
-  if (!body) return startOverview(business);
-  return {
-    data: base('empresa', 'browse', { menuId }),
-    replies: [buttons(body, menus.DETAIL_BUTTONS)],
+    replies: [buttons(menus.overviewText(business.name), menus.OFFER_BUTTONS)],
   };
 }
 
@@ -82,11 +69,11 @@ function startHub(business) {
       buttons(
         `🎉 *Eventos en ${business.name}*\n\n` +
           `Puedo ayudarte con dos cosas:\n` +
-          `• menús de empresa de diciembre (comida o cena);\n` +
+          `• comidas de Navidad para empresas, con menú a medida (desde 55 € + IVA por persona);\n` +
           `• un evento grande o un congreso (la especialidad de la casa: de 500 a 700 personas entre todos los espacios).\n\n` +
           `Ninguna de las dos queda confirmada por aquí: el equipo envía el presupuesto.`,
         [
-          { id: 'emp_menus', title: 'Menús de empresa' },
+          { id: 'emp_menus', title: 'Comidas Navidad' },
           { id: 'cong_start', title: 'Evento o congreso' },
         ]
       ),
@@ -96,8 +83,7 @@ function startHub(business) {
 
 function startIntent(intent, business) {
   if (!intent) return startHub(business);
-  if (intent.kind === 'empresa_detail') return startDetail(business, intent.menuId);
-  if (intent.kind === 'empresa_overview') return startOverview(business);
+  if (intent.kind === 'empresa_overview' || intent.kind === 'empresa_detail') return startOverview(business);
   if (intent.kind === 'congreso') return startCongreso(business);
   return startHub(business);
 }
@@ -209,37 +195,18 @@ function looksLikeQuestion(raw) {
   return /\?/.test(raw || '') || /^(que |cual |cuanto |cuanta |teneis |hay |podeis |puede )/.test(n);
 }
 
-function menuChoice(norm, buttonId) {
-  const fromButton = menus.menuIdFromButton(buttonId);
-  if (fromButton) return fromButton;
-  if (/^1$/.test(norm)) return 'mediodia';
-  if (/^2$/.test(norm)) return 'navidad';
-  if (/^3$/.test(norm)) return 'gran_gala';
-  if (/gran gala|^gala$|menu gala/.test(norm)) return 'gran_gala';
-  if (/mediodia/.test(norm)) return 'mediodia';
-  if (/menu navidad|^navidad$|el navidad/.test(norm)) return 'navidad';
-  return null;
-}
-
 function flag(value) {
   if (value === true) return 'sí';
   if (value === false) return 'no';
   return 'no indicado';
 }
 
-function mentionedMenuLabel(raw) {
-  const id = menus.singleMenuId(normalize(raw));
-  if (!id) return null;
-  return menus.MENU_BY_ID[id].name;
-}
-
 function empresaDetails(data, from) {
-  const menu = menus.MENU_BY_ID[data.menuId];
   const parts = [
     `Empresa: ${data.company}`,
     `Contacto: ${data.contactName}`,
-    `Menú: ${menu.name}`,
-    `Precio: ${menu.priceShort}`,
+    `Menú: ${menus.OFFER_NAME} (menú a medida)`,
+    `Precio: ${menus.PRICE_SHORT}`,
     `Servicio: ${data.service}`,
     `Email: ${data.email || '—'}`,
     `Tel: ${data.phoneContact}`,
@@ -252,7 +219,6 @@ function empresaDetails(data, from) {
 
 function congresoDetails(data, from) {
   const fechas = data.dateEndLabel ? `${data.dateLabel} → ${data.dateEndLabel}` : data.dateLabel;
-  const menu = mentionedMenuLabel(data.needsRaw || '');
   const parts = [
     `Empresa: ${data.company}`,
     `Contacto: ${data.contactName}`,
@@ -269,20 +235,18 @@ function congresoDetails(data, from) {
     'Pendiente casa: nombre y aforo de cada salón; equipamiento audiovisual',
     'Estado: pendiente de presupuesto',
   ];
-  if (menu) parts.push(`Menú citado: ${menu}`);
   return parts.join(' | ');
 }
 
 function reviewEmpresa(data, business) {
-  const menu = menus.MENU_BY_ID[data.menuId];
   return (
-    `*Solicitud de menú de empresa*\n` +
+    `*Solicitud de comida de Navidad*\n` +
     `Si la envías, el equipo de ${business.name} prepara el presupuesto. La fecha no queda reservada.\n\n` +
     `🏢 ${data.company}\n` +
     `🙋 ${data.contactName}\n` +
     `📅 ${data.dateLabel} · ${data.service}\n` +
     `👥 ${data.partySize} personas\n` +
-    `🎄 ${menu.name} — ${menu.priceShort}\n` +
+    `🎄 ${menus.OFFER_NAME} — menú a medida, ${menus.PRICE_SHORT}\n` +
     `✉️ ${data.email || 'sin email'}\n` +
     `📱 ${data.phoneContact}\n\n` +
     `${conocimiento.spaceHint(data.partySize)}\n` +
@@ -315,11 +279,10 @@ const REVIEW_BUTTONS = [
 ];
 
 function thanksEmpresa(data, business) {
-  const menu = menus.MENU_BY_ID[data.menuId];
   return (
     `Gracias, ${data.contactName}. He anotado la solicitud nº {{id}} de *${data.company}*.\n\n` +
     `📅 ${data.dateLabel} · ${data.service} · ${data.partySize} personas\n` +
-    `🎄 ${menu.name} — ${menu.priceShort}\n\n` +
+    `🎄 ${menus.OFFER_NAME} — menú a medida, ${menus.PRICE_SHORT}\n\n` +
     `Queda *pendiente de presupuesto*. En breve te escribe el equipo de ${business.name}. No reservo la fecha hasta entonces.\n\n` +
     `📍 ${business.address}\n📞 ${business.phone}`
   );
@@ -337,12 +300,11 @@ function thanksCongreso(data, business) {
 }
 
 function adminEmpresa(data, from) {
-  const menu = menus.MENU_BY_ID[data.menuId];
   return (
     `🎄 SOLICITUD EMPRESA pendiente de presupuesto #{{id}}\n` +
     `Empresa: ${data.company}\nContacto: ${data.contactName}\n` +
     `${data.dateLabel} · ${data.service} · ${data.partySize} personas\n` +
-    `Menú: ${menu.name} (${menu.priceShort})\n` +
+    `Menú: ${menus.OFFER_NAME} (menú a medida, ${menus.PRICE_SHORT})\n` +
     `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`
   );
 }
@@ -407,44 +369,35 @@ function askCompany(data) {
   );
 }
 
+function wantsEmpresaBooking(norm, buttonId) {
+  if (buttonId === 'emp_book' || buttonId === 'emp_mediodia' || buttonId === 'emp_navidad' || buttonId === 'emp_gala') {
+    return true;
+  }
+  return (
+    /^(solicitar|reservar|presupuesto|pedir presupuesto|quiero solicitar|me interesa)$/.test(norm) ||
+    /solicitar|pedir presupuesto|quiero este|lo quiero|pedir fecha|\breservar\b/.test(norm)
+  );
+}
+
 function handleBrowse(data, raw, norm, buttonId, business) {
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
-  if (buttonId === 'emp_overview' || buttonId === 'emp_menus' || /ver los tres|los tres|volver a los menus/.test(norm)) {
-    return startOverview(business);
-  }
+  if (buttonId === 'emp_overview' || buttonId === 'emp_menus') return startOverview(business);
   if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
   const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm) : null;
-  if (side && !menus.menuIdFromButton(buttonId)) {
+  if (side && !wantsEmpresaBooking(norm, buttonId)) {
     return stay(data, [
       text(side),
-      buttons('Cuando quieras, elige un menú o escribe *solicitar*.', menus.OVERVIEW_BUTTONS),
+      buttons('Cuando quieras, escribe *solicitar* y tomo los datos.', menus.OFFER_BUTTONS),
     ]);
   }
-  const chosen = menuChoice(norm, buttonId);
-  if (chosen && buttonId !== 'emp_book') return startDetail(business, chosen);
-  const wantsBook =
-    buttonId === 'emp_book' ||
-    /^(solicitar|reservar|presupuesto|pedir presupuesto|quiero solicitar|me interesa)$/.test(norm) ||
-    /solicitar|pedir presupuesto|quiero este|lo quiero|pedir fecha|\breservar\b/.test(norm);
-  if (wantsBook) {
-    const next = { ...data, flow: 'empresa', stage: 'company' };
-    if (buttonId === 'emp_book' && data.menuId) next.menuId = data.menuId;
-    else if (chosen) next.menuId = chosen;
-    return stay(next, [text('Qué bien. ¿A nombre de qué empresa lo preparo?')]);
+  if (wantsEmpresaBooking(norm, buttonId)) {
+    return stay({ ...data, flow: 'empresa', stage: 'company' }, [text('Qué bien. ¿A nombre de qué empresa lo preparo?')]);
   }
-  if (chosen) return startDetail(business, chosen);
-  return stay(data, [
-    buttons(
-      'Puedo detallarte el Menú Mediodía, el Menú Navidad o el Menú Gran Gala. Escribe *solicitar* si ya quieres pedir fecha.',
-      menus.OVERVIEW_BUTTONS
-    ),
-  ]);
+  return startOverview(business);
 }
 
 function handleHub(data, raw, norm, buttonId, business) {
   if (buttonId === 'emp_menus' || menus.isEmpresaTopic(norm)) {
-    const detail = menus.explicitMenuDetail(norm);
-    if (detail) return startDetail(business, detail);
     return startOverview(business);
   }
   if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
@@ -452,8 +405,8 @@ function handleHub(data, raw, norm, buttonId, business) {
   if (side) {
     return stay(data, [
       text(side),
-      buttons('¿Seguimos con un menú de empresa o con un congreso?', [
-        { id: 'emp_menus', title: 'Menús de empresa' },
+      buttons('¿Seguimos con las comidas de Navidad o con un congreso?', [
+        { id: 'emp_menus', title: 'Comidas Navidad' },
         { id: 'cong_start', title: 'Evento o congreso' },
       ]),
     ]);
@@ -478,10 +431,16 @@ function handle(ctx) {
 
   if (!data.stage) {
     if (buttonId === 'cong_start') return startCongreso(business);
-    if (buttonId === 'emp_menus' || buttonId === 'emp_overview') return startOverview(business);
-    const picked = menus.menuIdFromButton(buttonId);
-    if (picked) return startDetail(business, picked);
-    if (buttonId === 'emp_book') return startOverview(business);
+    if (
+      buttonId === 'emp_menus' ||
+      buttonId === 'emp_overview' ||
+      buttonId === 'emp_book' ||
+      buttonId === 'emp_mediodia' ||
+      buttonId === 'emp_navidad' ||
+      buttonId === 'emp_gala'
+    ) {
+      return startOverview(business);
+    }
     return startHub(business);
   }
 
@@ -491,7 +450,6 @@ function handle(ctx) {
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
   if (buttonId === 'emp_fix' || (data.stage === 'review' && /corregir|repetir|cambiar/.test(norm))) {
     const kept = { flow: data.flow, stage: 'company' };
-    if (data.flow === 'empresa' && data.menuId) kept.menuId = data.menuId;
     return stay(kept, [text('De acuerdo, lo repetimos. ¿A nombre de qué empresa o entidad lo preparo?')]);
   }
 
@@ -670,28 +628,14 @@ function handle(ctx) {
         text(`La capacidad total de los espacios es de 500 a 700 personas. Dime un número dentro de ese aforo.`),
       ]);
     }
-    const next = { ...data, partySize: n };
-    if (next.menuId && menus.MENU_BY_ID[next.menuId]) {
-      next.stage = 'reach';
-      return stay(next, [text(`${n} personas. ${conocimiento.spaceHint(n)}`), reachPrompt()]);
-    }
-    next.stage = 'menu';
-    return stay(next, [
-      text(`${n} personas. ${conocimiento.spaceHint(n)}`),
-      buttons('¿Qué menú os apetece?', menus.OVERVIEW_BUTTONS),
-    ]);
+    return stay(
+      { ...data, partySize: n, stage: 'reach' },
+      [text(`${n} personas. ${conocimiento.spaceHint(n)}`), reachPrompt()]
+    );
   }
 
   if (data.stage === 'menu') {
-    const chosen = menuChoice(norm, buttonId);
-    if (!chosen) {
-      const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm) : null;
-      if (side) {
-        return stay(data, [text(side), buttons('¿Cuál de los tres menús reservo en la solicitud?', menus.OVERVIEW_BUTTONS)]);
-      }
-      return stay(data, [buttons('Elige Menú Mediodía, Menú Navidad o Menú Gran Gala.', menus.OVERVIEW_BUTTONS)]);
-    }
-    return stay({ ...data, menuId: chosen, stage: 'reach' }, [reachPrompt()]);
+    return stay({ ...data, stage: 'reach' }, [reachPrompt()]);
   }
 
   if (data.stage === 'reach') {
@@ -754,7 +698,6 @@ module.exports = {
   startHub,
   startIntent,
   startOverview,
-  startDetail,
   startCongreso,
   handle,
   stampId,

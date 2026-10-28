@@ -112,55 +112,21 @@ beforeEach(() => {
   Settings.now = () => new Date('2026-10-22T10:00:00+02:00').getTime();
 });
 
-describe('menús de empresa, solo platos del documento', () => {
-  it('resume los tres menús con su precio y sin platos', () => {
+const OLD_OFFER = /menú mediodía|menú navidad|menú gran gala|65\s*€|110\s*€|precio a consultar|stracciatella|pistacho|wellington|capuccino|mazapán|cochinillo|lubina/i;
+
+describe('comidas de Navidad para empresas', () => {
+  it('ofrece un menú a medida desde 55 € + IVA y no carta tipificada', () => {
     const text = menus.overviewText('Hostería Don Fadrique');
-    assert.match(text, /Menú Mediodía/);
-    assert.match(text, /Precio a consultar \(\+ IVA\)/);
-    assert.match(text, /Menú Navidad/);
-    assert.match(text, /65 € \+ IVA por persona/);
-    assert.match(text, /Menú Gran Gala/);
-    assert.match(text, /110 € \+ IVA por persona, vinos incluidos/);
-    assert.deepEqual(text.match(/\d+\s*€/g), ['65 €', '110 €']);
-    assert.doesNotMatch(text, /stracciatella|pistacho|wellington|capuccino|mazapán/i);
+    assert.match(text, /Comidas de Navidad para empresas/);
+    assert.match(text, /menú a medida/);
+    assert.match(text, /desde 55 € \+ IVA por persona/);
+    assert.deepEqual(text.match(/\d+\s*€/g), ['55 €']);
+    assert.match(text, /desde 10 personas/);
+    assert.match(text, /10 a 50/);
+    assert.match(text, /500 a 700/);
+    assert.match(text, /se detallan en el presupuesto/);
+    assert.doesNotMatch(text, OLD_OFFER);
     assert.doesNotMatch(text, FORBIDDEN);
-  });
-
-  it('detalla cada menú con sus platos y no con los de otro', () => {
-    const mediodia = menus.detailText('mediodia');
-    const navidad = menus.detailText('navidad');
-    const gala = menus.detailText('gran_gala');
-
-    assert.match(mediodia, /fiambres navideños \(pastrami ibérico, paté navideño, croqueta de jamón\)/);
-    assert.match(mediodia, /ensalada de rúcula con nueces, granada y stracciatella artesana/);
-    assert.match(mediodia, /consomé de faisán con su albóndiga/);
-    assert.match(mediodia, /cochinillo asado tradicional/);
-    assert.match(mediodia, /lubina con ajada/);
-    assert.match(mediodia, /chocolate de Navidad/);
-    assert.match(mediodia, /a elegir uno para todo el grupo/);
-    assert.doesNotMatch(mediodia, /pistacho|mazapán|wellington|capuccino|granizado/);
-
-    assert.match(navidad, /jamón, gambas, paté de pato y fiambres navideños/);
-    assert.match(navidad, /alcachofa con pistacho y café/);
-    assert.match(navidad, /lubina/);
-    assert.match(navidad, /cochinillo de Navidad \(alternativa posible: tostón a la leña\)/);
-    assert.match(navidad, /mazapán carmelita/);
-    assert.match(navidad, /65 € \+ IVA/);
-    assert.doesNotMatch(navidad, /stracciatella|wellington|capuccino|ajada/);
-
-    assert.match(gala, /jamón, gambas y anchoa/);
-    assert.match(gala, /capuccino de lentejas con perdiz/);
-    assert.match(gala, /buñuelo de gambas con jugo de sus cabezas/);
-    assert.match(gala, /ahumado nórdico de trucha con sus huevas/);
-    assert.match(gala, /lubina o besugo, según mercado/);
-    assert.match(gala, /granizado de champán/);
-    assert.match(gala, /venado de Navidad con ragú de setas/);
-    assert.match(gala, /solomillo Wellington/);
-    assert.match(gala, /tatin de manzana con helado de mango/);
-    assert.match(gala, /cremoso de queso con almendra amarga y helado de turrón/);
-    assert.match(gala, /110 € \+ IVA por persona, vinos incluidos/);
-    assert.doesNotMatch(gala, /stracciatella|mazapán|ajada|paté de pato/);
-    assert.doesNotMatch(`${mediodia}\n${navidad}\n${gala}`, FORBIDDEN);
   });
 
   it('deja por escrito los datos de sala y audiovisual que no existen', () => {
@@ -180,8 +146,13 @@ describe('menús de empresa, solo platos del documento', () => {
     assert.doesNotMatch(intro, FORBIDDEN);
     const vinos = conocimiento.answerSideQuestion('que vinos incluye el gran gala');
     assert.match(vinos, /se detallan en el presupuesto/);
-    assert.match(vinos, /vinos van incluidos/);
+    assert.match(vinos, /desde 55 € \+ IVA/);
+    assert.doesNotMatch(vinos, OLD_OFFER);
     assert.doesNotMatch(vinos, FORBIDDEN);
+    const platos = conocimiento.answerSideQuestion('que platos lleva el menu navidad');
+    assert.match(platos, /menú a medida/);
+    assert.match(platos, /presupuesto/);
+    assert.doesNotMatch(platos, OLD_OFFER);
   });
 });
 
@@ -200,7 +171,9 @@ describe('conversación', () => {
     assert.match(body, /13:30-15:30/);
     assert.match(body, /20:30-22:30/);
     assert.match(body, /martes y miércoles/);
-    assert.match(body, /menús de Navidad|congreso/i);
+    assert.match(body, /comidas de Navidad para empresas/);
+    assert.match(body, /desde 55 € \+ IVA/);
+    assert.match(body, /congreso/i);
     assert.doesNotMatch(body, /OTIVM|35/);
   });
 
@@ -247,22 +220,18 @@ describe('conversación', () => {
     assert.equal(reservations.length, 0);
   });
 
-  it('menús de Navidad enseña el resumen y el detalle solo si lo piden', async () => {
-    let messages = await say('34600000004', 'menús de Navidad');
-    let body = joined(messages);
-    assert.match(body, /Menú Mediodía/);
-    assert.match(body, /Menú Navidad/);
-    assert.match(body, /Menú Gran Gala/);
-    assert.match(body, /65 €/);
-    assert.match(body, /110 €/);
-    assert.match(body, /Precio a consultar/);
-    assert.doesNotMatch(body, /pistacho|stracciatella|wellington/i);
+  it('comidas de Navidad ofrecen menú a medida y no la carta antigua', async () => {
+    let body = joined(await say('34600000004', 'menús de Navidad'));
+    assert.match(body, /Comidas de Navidad para empresas/);
+    assert.match(body, /menú a medida/);
+    assert.match(body, /desde 55 € \+ IVA por persona/);
+    assert.doesNotMatch(body, OLD_OFFER);
 
-    messages = await say('34600000004', 'qué incluye el menú gran gala');
-    body = joined(messages);
-    assert.match(body, /capuccino de lentejas con perdiz/);
-    assert.match(body, /solomillo Wellington/);
-    assert.doesNotMatch(body, FORBIDDEN);
+    body = joined(await say('34600000004', 'qué incluye el menú gran gala'));
+    assert.match(body, /menú a medida/);
+    assert.match(body, /desde 55 € \+ IVA/);
+    assert.match(body, /presupuesto/);
+    assert.doesNotMatch(body, OLD_OFFER);
     assert.doesNotMatch(body, /confirmad/i);
   });
 
@@ -283,9 +252,11 @@ describe('conversación', () => {
     await say(phone, '30');
     body = joined(await say(phone, 'lucia@talleresalba.es'));
     assert.match(body, /Talleres Alba SL/);
-    assert.match(body, /Menú Navidad/);
+    assert.match(body, /menú a medida/);
+    assert.match(body, /desde 55 € \+ IVA/);
     assert.match(body, /no queda reservada|pendiente/i);
     assert.doesNotMatch(body, /confirmad/i);
+    assert.doesNotMatch(body, OLD_OFFER);
 
     body = joined(await say(phone, 'enviar', 'emp_send'));
     assert.match(body, /pendiente de presupuesto/);
@@ -301,9 +272,11 @@ describe('conversación', () => {
     assert.equal(saved.name, 'Lucía Fernández');
     assert.equal(saved.phone, phone);
     assert.match(saved.details, /Talleres Alba SL/);
-    assert.match(saved.details, /Menú Navidad/);
+    assert.match(saved.details, /Comidas de Navidad para empresas/);
+    assert.match(saved.details, /menú a medida/);
+    assert.match(saved.details, /desde 55 € \+ IVA por persona/);
     assert.match(saved.details, /lucia@talleresalba\.es/);
-    assert.match(saved.details, /65 € \+ IVA/);
+    assert.doesNotMatch(saved.details, OLD_OFFER);
     assert.doesNotMatch(saved.details, FORBIDDEN);
 
     const admin = sent.filter((m) => m.to === '34699999999').map((m) => m.body).join('\n');
@@ -330,17 +303,17 @@ describe('conversación', () => {
     assert.match(body, /10/);
     assert.equal(reservations.length, 0);
     body = joined(await say(phone, '40'));
-    assert.match(body, /menú/i);
-    await say(phone, 'mediodía', 'emp_mediodia');
+    assert.match(body, /email|teléfono|WhatsApp/i);
     await say(phone, 'este');
     body = joined(await say(phone, 'enviar', 'emp_send'));
     assert.match(body, /pendiente de presupuesto/);
-    assert.match(body, /Precio a consultar/);
+    assert.match(body, /desde 55 € \+ IVA/);
+    assert.doesNotMatch(body, OLD_OFFER);
     assert.equal(reservations.at(-1).date, '2026-12-31');
     assert.equal(reservations.at(-1).time, 'comida');
-    assert.equal(reservations.at(-1).menuId, undefined);
-    assert.match(reservations.at(-1).details, /Menú Mediodía/);
+    assert.match(reservations.at(-1).details, /menú a medida/);
     assert.equal(reservations.at(-1).status, 'pending');
+    assert.equal(reservations.at(-1).type, 'evento_empresa');
   });
 
   it('anota un congreso como pendiente sin inventar salas ni equipos', async () => {
@@ -389,8 +362,9 @@ describe('conversación', () => {
     const messages = await say('34600000008', 'eventos', 'exp_eventos');
     assert.deepEqual(messages[0].buttons.map((b) => b.id), ['emp_menus', 'cong_start']);
     const body = joined(await say('34600000008', 'menús', 'emp_menus'));
-    assert.match(body, /Menú Navidad/);
-    assert.match(body, /65 €/);
+    assert.match(body, /Comidas de Navidad para empresas/);
+    assert.match(body, /desde 55 € \+ IVA/);
+    assert.doesNotMatch(body, OLD_OFFER);
   });
 });
 
