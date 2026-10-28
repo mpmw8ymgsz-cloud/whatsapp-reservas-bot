@@ -126,6 +126,8 @@ Edita [src/config.js](src/config.js), haz commit y push (Render vuelve a despleg
   persona, todo diciembre) y solicitudes de congreso o evento grande. Esas solicitudes
   se guardan como *pendientes de presupuesto* (no quedan confirmadas) y salen en `/admin`.
 - OTIVM no se ofrece: es un espacio de la zona de cocina y está cerrado fuera de temporada.
+- **Cómo llegar**: dirección y enlace para el GPS. El traslado o el autobús de grupos se
+  estudia según tamaño y fecha, y se confirma en el presupuesto.
 - Si la hora pedida en el restaurante no está disponible o está completa, el bot ofrece
   una lista con los horarios libres más cercanos.
 - **Mis reservas**: muestra las reservas futuras del número que escribe, y permite

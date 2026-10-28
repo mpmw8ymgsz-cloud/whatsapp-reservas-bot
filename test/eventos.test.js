@@ -76,6 +76,7 @@ Module.prototype.require = function (id) {
 const { handleIncoming } = require('../src/conversation');
 const menus = require('../src/menusEmpresa');
 const conocimiento = require('../src/eventosConocimiento');
+const faq = require('../src/faqLlegada');
 const { renderAdminPage } = require('../src/server-meta');
 
 const FORBIDDEN = /d[ií]scolo|moscato|\baula\b|proyector|microfon[ií]a|sal[oó]n real|sal[oó]n goya|incluido el iva|35\s*€/i;
@@ -419,5 +420,78 @@ describe('panel de administración', () => {
     assert.match(html, /wa\.me\/34600000005/);
     const src = fs.readFileSync(path.join(__dirname, '../src/server-meta.js'), 'utf8');
     assert.match(src, /getPendingEventRequests\(\)/);
+  });
+});
+
+describe('cómo llegar y traslado', () => {
+  const business = {
+    name: 'Hostería Don Fadrique',
+    phone: '923 37 00 76',
+    web: 'https://www.donfadrique.com/',
+  };
+
+  it('da la dirección y un enlace al GPS, sin inventar aparcamiento ni líneas', () => {
+    const body = faq.reply({ location: true, parking: true, business, inFlow: false });
+    assert.match(body, /Ctra\. de Salamanca – Alba de Tormes km 17, 37800 Alba de Tormes \(Salamanca\)/);
+    assert.match(body, /923 37 00 76/);
+    assert.match(body, /https:\/\/www\.donfadrique\.com\//);
+    assert.match(body, /google\.com\/maps\/search/);
+    assert.match(body, /no lo tengo detallado/);
+    assert.doesNotMatch(body, /gratuito|plazas de|línea \d|minutos|autocar siempre|siempre hay/i);
+  });
+
+  it('el traslado se estudia según grupo y fecha, sin prometerlo ni negarlo', () => {
+    const body = faq.transportReply({ inFlow: false });
+    assert.match(body, /se estudia según el tamaño del grupo y la fecha/);
+    assert.match(body, /presupuest/);
+    assert.doesNotMatch(body, /siempre (tenemos|hay|ponemos|disponemos|inclu)/i);
+    assert.doesNotMatch(body, /nunca|no hacemos traslado|no hay autobús|no tenemos bus/i);
+  });
+
+  it('responde a cómo llegar, dónde estáis y al autobús', async () => {
+    let body = joined(await say('34600000021', 'dónde estáis'));
+    assert.match(body, /Alba de Tormes km 17/);
+    assert.match(body, /Google Maps/);
+
+    body = joined(await say('34600000022', 'cómo se va'));
+    assert.match(body, /GPS/);
+    assert.doesNotMatch(body, /65 €|110 €/);
+
+    body = joined(await say('34600000023', 'hay bus para el grupo'));
+    assert.match(body, /se estudia según el tamaño del grupo y la fecha/);
+    assert.doesNotMatch(body, /siempre tenemos|nunca/);
+
+    body = joined(await say('34600000024', 'ponéis autocar'));
+    assert.match(body, /presupuest/);
+
+    body = joined(await say('34600000025', 'transporte desde Salamanca'));
+    assert.match(body, /se estudia según el tamaño del grupo y la fecha/);
+
+    body = joined(await say('34600000026', 'shuttle'));
+    assert.match(body, /traslado o el autobús/i);
+  });
+
+  it('si lo piden en una comida de empresa, sigue el lead y anota el traslado', async () => {
+    const phone = '34600000027';
+    await say(phone, 'comida de empresa');
+    await say(phone, 'solicitar');
+    let body = joined(await say(phone, '¿ponéis autocar?'));
+    assert.match(body, /se estudia según el tamaño del grupo y la fecha/);
+    assert.match(body, /qué empresa/i);
+    assert.equal(reservations.length, 0);
+
+    await say(phone, 'Talleres Alba SL');
+    await say(phone, 'Lucía Fernández');
+    await say(phone, '01/12/2026');
+    await say(phone, 'cena', 'emp_cena');
+    await say(phone, '30');
+    body = joined(await say(phone, 'lucia@talleresalba.es'));
+    assert.match(body, /Traslado/);
+    assert.match(body, /desde 55 € \+ IVA/);
+    await say(phone, 'enviar', 'emp_send');
+    assert.equal(reservations.at(-1).type, 'evento_empresa');
+    assert.equal(reservations.at(-1).status, 'pending');
+    assert.match(reservations.at(-1).details, /Traslado: interesado/);
+    assert.match(reservations.at(-1).details, /menú a medida/);
   });
 });

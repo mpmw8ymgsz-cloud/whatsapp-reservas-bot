@@ -5,6 +5,7 @@ const wa = require('./wa');
 const { parseDate, parseTimeCandidates, getSlotsForDate, normalize } = require('./dateParser');
 const hotelApi = require('./hotelApi');
 const grupos = require('./grupos');
+const faq = require('./faqLlegada');
 
 const B = config.business;
 
@@ -76,6 +77,32 @@ async function handleIncoming(from, text, buttonId) {
 
   if (buttonId === 'exp_otivm' || (session.step !== STEP.NAME && grupos.isOtivmQuery(normText))) {
     return otivmCerrado(from);
+  }
+
+  if (!buttonId && session.step !== STEP.NAME && session.step !== STEP.GRUPO) {
+    const location = faq.isLocationQuery(normText);
+    const transport = faq.isTransportQuery(normText);
+    const intent = grupos.classifyIncoming(normText);
+    const asksFaq = location || transport;
+    const withLead = asksFaq && intent && (intent.kind === 'empresa_overview' || intent.kind === 'congreso');
+    if (asksFaq && (faq.shouldAnswerNow(text, normText) || withLead)) {
+      const body = faq.reply({
+        location,
+        transport,
+        parking: faq.isParkingQuery(normText),
+        business: B,
+        inFlow: withLead || session.step !== STEP.IDLE,
+      });
+      if (withLead) {
+        const started = grupos.startIntent(intent, B);
+        if (transport) started.data.transporte = true;
+        started.replies = [{ kind: 'text', body }, ...started.replies];
+        return dispatchGrupo(from, started);
+      }
+      const tail = session.step === STEP.IDLE ? '' : '\n\nCuando quieras seguimos con lo que estábamos apuntando.';
+      await wa.sendText(from, body + tail);
+      return;
+    }
   }
 
   if (buttonId === 'exp_eventos') {
