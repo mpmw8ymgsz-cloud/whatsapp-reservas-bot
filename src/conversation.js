@@ -4,6 +4,7 @@ const db = require('./db');
 const wa = require('./wa');
 const { parseDate, parseTimeCandidates, getSlotsForDate, normalize } = require('./dateParser');
 const hotelApi = require('./hotelApi');
+const grupos = require('./grupos');
 
 const B = config.business;
 
@@ -19,16 +20,27 @@ const STEP = {
   HOTEL_PAX: 'HOTEL_PAX',
   HOTEL_QUOTE: 'HOTEL_QUOTE',
   CANCEL_SELECT: 'CANCEL_SELECT',
+  GRUPO: 'GRUPO',
 };
 
-function expConfig(type) {
-  return type === 'otivm' ? B.otivm : B.restaurant;
+function expConfig() {
+  return B.restaurant;
 }
 
 function expLabel(type) {
-  if (type === 'otivm') return 'OTIVM (brunch · pool · tardeo)';
+  if (type === 'evento_empresa') return 'Empresa · pendiente';
+  if (type === 'evento_congreso') return 'Congreso · pendiente';
   if (type === 'hotel') return 'Hotel';
+  if (type === 'otivm') return 'OTIVM (histórico)';
   return 'Restaurante Don Fadrique';
+}
+
+function typeIcon(type) {
+  if (type === 'evento_congreso') return '🏛️';
+  if (type === 'evento_empresa') return '🎄';
+  if (type === 'hotel') return '🛏️';
+  if (type === 'otivm') return '🌿';
+  return '🍽️';
 }
 
 async function handleIncoming(from, text, buttonId) {
@@ -54,16 +66,33 @@ async function handleIncoming(from, text, buttonId) {
     return showMyReservations(from);
   }
 
+  if (session.step === STEP.GRUPO || grupos.isGrupoButton(buttonId)) {
+    const data = session.step === STEP.GRUPO ? session.data : {};
+    return dispatchGrupo(
+      from,
+      grupos.handle({ data, text, buttonId, from, zone: B.timezone, business: B })
+    );
+  }
+
+  if (buttonId === 'exp_otivm' || (session.step !== STEP.NAME && grupos.isOtivmQuery(normText))) {
+    return otivmCerrado(from);
+  }
+
+  if (buttonId === 'exp_eventos') {
+    return dispatchGrupo(from, grupos.startHub(B));
+  }
+
+  if (session.step !== STEP.NAME) {
+    const intent = grupos.classifyIncoming(normText);
+    if (intent) return dispatchGrupo(from, grupos.startIntent(intent, B));
+  }
+
   // Selección de experiencia desde el menú
   if (buttonId === 'exp_rest') return startRestaurant(from);
-  if (buttonId === 'exp_otivm') return startOtivm(from);
   if (buttonId === 'exp_hotel') return startHotel(from);
 
   // Atajos por texto libre
   if (session.step === STEP.IDLE) {
-    if (normText.includes('otivm') || normText.includes('piscina') || normText.includes('brunch') || normText.includes('tardeo')) {
-      return startOtivm(from);
-    }
     if (normText.includes('hotel') || normText.includes('habitacion') || normText.includes('dormir') || normText.includes('alojamiento')) {
       return startHotel(from);
     }
@@ -104,11 +133,11 @@ async function showMenu(from) {
   await db.clearSession(from);
   await wa.sendButtons(
     from,
-    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "mis reservas" para ver o cancelar las tuyas, o "info" para horarios y contacto._`,
+    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "mis reservas", "info", "comidas de Navidad" o "congreso"._`,
     [
       { id: 'exp_rest', title: '🍽️ Restaurante' },
-      { id: 'exp_otivm', title: '🌿 OTIVM · Pool' },
       { id: 'exp_hotel', title: '🛏️ Hotel' },
+      { id: 'exp_eventos', title: '🎉 Eventos' },
     ]
   );
 }
@@ -119,9 +148,9 @@ async function sendInfo(from) {
     `ℹ️ *${B.name}*\n\n` +
       `📍 ${B.address}\n📞 ${B.phone}\n🌐 ${B.web}\n\n` +
       `🍽️ *Restaurante*: comidas 13:30-15:30 y cenas 20:30-22:30. Cerrado martes y miércoles.\n\n` +
-      `🌿 *OTIVM* (brunch · pool · tardeo): ${B.otivm.pricePerPerson}€/persona, incluye ${B.otivm.includes}. ` +
-      `Jueves a domingo de julio a septiembre, de 12:00 a 21:00. Solo con reserva, plazas limitadas.\n\n` +
       `🛏️ *Hotel*: reserva online en ${B.hotelBookingUrl} o escríbeme aquí y aviso a recepción.\n\n` +
+      `🎉 *Eventos*: congresos y grupos grandes (capacidad total de 500 a 700; terraza acristalada de 10 a 50). ` +
+      `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. Escribe *eventos* o *congreso*.\n\n` +
       `Escribe *menu* para volver al inicio.`
   );
 }
@@ -133,18 +162,6 @@ async function startRestaurant(from) {
   await wa.sendText(
     from,
     `🍽️ *Restaurante Don Fadrique*\n\n¿Para qué día quieres la mesa? (ej: "hoy", "mañana", "viernes", "15/08")\n\n_Comidas 13:30-15:30 · Cenas 20:30-22:30 · Cerrado martes y miércoles_`
-  );
-}
-
-// ---------- Flujo OTIVM ----------
-
-async function startOtivm(from) {
-  await db.setSession(from, STEP.DATE, { type: 'otivm' });
-  await wa.sendText(
-    from,
-    `🌿 *OTIVM · Brunch · Pool · Tardeo*\n\n${B.otivm.pricePerPerson}€ por persona. Incluye ${B.otivm.includes}.\n` +
-      `Abierto jueves a domingo, de julio a septiembre, de 12:00 a 21:00. Plazas limitadas.\n\n` +
-      `¿Qué día quieres venir? (ej: "sábado", "12/07")`
   );
 }
 
@@ -328,6 +345,7 @@ async function handleHotelQuote(from, buttonId, session, text) {
 // ---------- Pasos comunes (fecha/hora/personas/nombre/confirmación) ----------
 
 async function handleDateStep(from, text, session) {
+  if (session.data.type === 'otivm') return otivmCerrado(from);
   const zone = B.timezone;
   const type = session.data.type;
   const cfg = expConfig(type);
@@ -344,21 +362,16 @@ async function handleDateStep(from, text, session) {
     return wa.sendText(from, `Aceptamos reservas con hasta ${B.advanceBookingDays} días de antelación. Prueba con otra fecha.`);
   }
 
-  if (type === 'otivm' && !B.otivm.months.includes(dt.month)) {
-    return wa.sendText(from, 'OTIVM abre de julio a septiembre 🌞. Dime una fecha dentro de la temporada.');
-  }
-
   const slots = getSlotsForDate(dt, cfg);
   if (slots.length === 0) {
-    const cierre = type === 'otivm' ? 'OTIVM abre de jueves a domingo' : 'El restaurante cierra martes y miércoles';
-    return wa.sendText(from, `Ese día no abrimos 😔 (${cierre}). Prueba con otra fecha.`);
+    return wa.sendText(from, 'Ese día no abrimos 😔 (el restaurante cierra martes y miércoles). Prueba con otra fecha.');
   }
 
   session.data.date = dt.toFormat('yyyy-MM-dd');
   session.data.dateLabel = dt.setLocale('es').toFormat("cccc d 'de' LLLL");
   await db.setSession(from, STEP.TIME, session.data);
 
-  const hint = type === 'otivm' ? '(ej: "12:00", "17:30")' : '(ej: "14:00" para comer, "21:00" para cenar)';
+  const hint = '(ej: "14:00" para comer, "21:00" para cenar)';
   await wa.sendText(from, `Perfecto, ${session.data.dateLabel}. ¿A qué hora? ${hint}`);
 }
 
@@ -437,16 +450,11 @@ async function handleNameStep(from, text, session) {
 }
 
 async function goToConfirm(from, session) {
+  if (session.data.type === 'otivm') return otivmCerrado(from);
   await db.setSession(from, STEP.CONFIRM, session.data);
   const d = session.data;
 
-  let resumen;
-  if (d.type === 'otivm') {
-    const total = d.partySize * B.otivm.pricePerPerson;
-    resumen = `Confirma tu reserva en *OTIVM*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n💶 ${B.otivm.pricePerPerson}€/persona (${total}€, incluye ${B.otivm.includes})\n\n¿Confirmo?`;
-  } else {
-    resumen = `Confirma tu reserva en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Confirmo?`;
-  }
+  const resumen = `Confirma tu reserva en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Confirmo?`;
 
   await wa.sendButtons(from, resumen, [
     { id: 'confirm_yes', title: '✅ Confirmar' },
@@ -461,6 +469,7 @@ async function handleConfirmStep(from, buttonId, session, text) {
 
   if (isYes) {
     const d = session.data;
+    if (d.type === 'otivm') return otivmCerrado(from);
 
     const id = await db.createReservation({
       phone: from,
@@ -472,22 +481,14 @@ async function handleConfirmStep(from, buttonId, session, text) {
     });
     await db.clearSession(from);
 
-    if (d.type === 'otivm') {
-      await wa.sendText(
-        from,
-        `¡Reserva confirmada en OTIVM! 🌿🎉 (nº ${id})\n📅 ${d.dateLabel} a las ${d.time}\n👥 ${d.partySize} personas\n\n` +
-          `Recuerda: ${B.otivm.pricePerPerson}€/persona, incluye ${B.otivm.includes}. ¡Nos vemos en la piscina!\n\n_Para cancelar, escribe "mis reservas"._`
-      );
-    } else {
-      await wa.sendText(
-        from,
-        `¡Mesa confirmada! 🍽️🎉 (nº ${id})\n📅 ${d.dateLabel} a las ${d.time}\n👥 ${d.partySize} personas\n\n` +
-          `Te esperamos en ${B.name}.\n📍 ${B.address}\n\n_Para cancelar, escribe "mis reservas"._`
-      );
-    }
+    await wa.sendText(
+      from,
+      `¡Mesa confirmada! 🍽️🎉 (nº ${id})\n📅 ${d.dateLabel} a las ${d.time}\n👥 ${d.partySize} personas\n\n` +
+        `Te esperamos en ${B.name}.\n📍 ${B.address}\n\n_Para cancelar, escribe "mis reservas"._`
+    );
 
     if (config.adminPhone) {
-      const tipo = d.type === 'otivm' ? '🌿 OTIVM' : '🍽️ RESTAURANTE';
+      const tipo = '🍽️ RESTAURANTE';
       await wa.sendText(
         config.adminPhone,
         `${tipo} — reserva #${id}\n${d.dateLabel} ${d.time}\n${d.partySize} personas\nNombre: ${d.name}\nTel: ${from}`
@@ -514,19 +515,28 @@ async function sendAdminList(from, daysAhead) {
   const toDate = end.toFormat('yyyy-MM-dd');
 
   const list = await db.getReservationsByDateRange(fromDate, toDate);
-  if (list.length === 0) {
+  const pending = (await db.getPendingEventRequests()).filter((r) => r.date >= fromDate && r.date <= toDate);
+  if (list.length === 0 && pending.length === 0) {
     return wa.sendText(from, `📋 Sin reservas entre ${fromDate} y ${toDate}.`);
   }
 
-  let msg = `📋 *Reservas ${fromDate}${toDate !== fromDate ? ' → ' + toDate : ''}* (${list.length})\n`;
-  let currentDate = '';
-  for (const r of list) {
-    if (r.date !== currentDate) {
-      currentDate = r.date;
-      msg += `\n📅 *${r.date}*\n`;
+  let msg = '';
+  if (list.length) {
+    msg += `📋 *Reservas ${fromDate}${toDate !== fromDate ? ' → ' + toDate : ''}* (${list.length})\n`;
+    let currentDate = '';
+    for (const r of list) {
+      if (r.date !== currentDate) {
+        currentDate = r.date;
+        msg += `\n📅 *${r.date}*\n`;
+      }
+      msg += `${typeIcon(r.type)} #${r.id} ${r.time} · ${r.name}${r.party_size ? ' · ' + r.party_size + 'p' : ''}${r.details ? ' · ' + r.details : ''} · 📱${r.phone}\n`;
     }
-    const icon = r.type === 'otivm' ? '🌿' : r.type === 'hotel' ? '🛏️' : '🍽️';
-    msg += `${icon} #${r.id} ${r.time} · ${r.name}${r.party_size ? ' · ' + r.party_size + 'p' : ''}${r.details ? ' · ' + r.details : ''} · 📱${r.phone}\n`;
+  }
+  if (pending.length) {
+    msg += `\n⏳ *Solicitudes de eventos pendientes de presupuesto*\n`;
+    for (const r of pending) {
+      msg += `${typeIcon(r.type)} #${r.id} ${r.date} ${r.time} · ${r.name}${r.party_size ? ' · ' + r.party_size + 'p' : ''}${r.details ? ' · ' + r.details : ''} · 📱${r.phone}\n`;
+    }
   }
   msg += `\n_Comandos: "hoy", "mañana", "semana"_`;
   await wa.sendText(from, msg);
@@ -541,11 +551,10 @@ async function showMyReservations(from) {
   }
 
   const rows = list.slice(0, 10).map((r) => {
-    const icon = r.type === 'otivm' ? '🌿' : r.type === 'hotel' ? '🛏️' : '🍽️';
     return {
       id: `cancel_${r.id}`,
       title: `#${r.id} ${r.date} ${r.time}`.slice(0, 24),
-      description: `${icon} ${expLabel(r.type)}${r.party_size ? ' · ' + r.party_size + 'p' : ''}`.slice(0, 72),
+      description: `${typeIcon(r.type)} ${expLabel(r.type)}${r.party_size ? ' · ' + r.party_size + 'p' : ''}`.slice(0, 72),
     };
   });
   await db.setSession(from, STEP.CANCEL_SELECT, {});
@@ -558,16 +567,74 @@ async function handleCancelSelect(from, buttonId) {
     return wa.sendText(from, 'Selecciona una reserva de la lista o escribe "menu" para salir.');
   }
   const id = parseInt(buttonId.replace('cancel_', ''), 10);
+  const row = await db.getReservationById(id, from);
   const ok = await db.cancelReservation(id, from);
   await db.clearSession(from);
   if (ok) {
-    await wa.sendText(from, `Reserva #${id} cancelada. ¡Esperamos verte pronto! 👋`);
+    const esEvento = row && (row.type === 'evento_empresa' || row.type === 'evento_congreso');
+    await wa.sendText(
+      from,
+      esEvento
+        ? `Solicitud #${id} anulada. Seguía pendiente de presupuesto.`
+        : `Reserva #${id} cancelada. ¡Esperamos verte pronto! 👋`
+    );
     if (config.adminPhone) {
       await wa.sendText(config.adminPhone, `❌ CANCELACIÓN — reserva #${id} (tel ${from})`);
     }
   } else {
     await wa.sendText(from, 'No pude cancelar esa reserva.');
   }
+}
+
+async function dispatchGrupo(from, result) {
+  if (!result) return;
+  if (result.goHome) return showMenu(from);
+  if (result.customerName) await db.upsertCustomerName(from, result.customerName);
+
+  if (result.reservation) {
+    let id;
+    try {
+      id = await db.createReservation(result.reservation.record);
+    } catch (err) {
+      console.error('[eventos] No se pudo guardar la solicitud:', err.message);
+      await wa.sendText(
+        from,
+        `No he podido anotar la solicitud ahora mismo. Llámanos al ${B.phone} y la tomamos por teléfono.`
+      );
+      return;
+    }
+    await db.clearSession(from);
+    await sendReplies(from, grupos.stampId(result.replies, id));
+    if (config.adminPhone && result.reservation.adminText) {
+      const [adminReply] = grupos.stampId([{ kind: 'text', body: result.reservation.adminText }], id);
+      await wa.sendText(config.adminPhone, adminReply.body);
+    }
+    return;
+  }
+
+  if (result.clear) await db.clearSession(from);
+  else if (result.data) await db.setSession(from, STEP.GRUPO, result.data);
+  await sendReplies(from, result.replies || []);
+}
+
+async function sendReplies(from, replies) {
+  for (const r of replies) {
+    if (r.kind === 'buttons') await wa.sendButtons(from, r.body, r.buttons);
+    else await wa.sendText(from, r.body);
+  }
+}
+
+async function otivmCerrado(from) {
+  await db.clearSession(from);
+  await wa.sendButtons(
+    from,
+    'OTIVM es un espacio en la zona de cocina y fuera de temporada está cerrado. No puedo reservarlo.\n\n¿Seguimos con el restaurante, el hotel o un evento?',
+    [
+      { id: 'exp_rest', title: '🍽️ Restaurante' },
+      { id: 'exp_hotel', title: '🛏️ Hotel' },
+      { id: 'exp_eventos', title: '🎉 Eventos' },
+    ]
+  );
 }
 
 module.exports = { handleIncoming };

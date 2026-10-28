@@ -116,16 +116,23 @@ Edita [src/config.js](src/config.js), haz commit y push (Render vuelve a despleg
 
 ## Cómo funciona el flujo de conversación
 
-- El usuario escribe **"hola"** o **"menu"** → el bot muestra 3 botones: Reservar, Mis
-  reservas, Ayuda.
-- **Reservar**: pregunta fecha → hora → nº de personas → nombre (solo la primera vez) →
-  resumen y confirmación.
-- Si la hora pedida no está disponible o está completa, el bot ofrece una lista con los
-  horarios libres más cercanos.
+- El usuario escribe **"hola"** o **"menu"** → el bot muestra 3 botones: Restaurante,
+  Hotel y Eventos.
+- **Restaurante**: pregunta fecha → hora → nº de personas → nombre (solo la primera vez) →
+  resumen y confirmación. Cerrado martes y miércoles.
+- **Hotel**: pregunta entrada, salida y personas, comprueba el PMS y confirma solo si el
+  cliente acepta el precio.
+- **Eventos**: comidas de Navidad para empresas (menú a medida, desde 55 € + IVA por
+  persona, todo diciembre) y solicitudes de congreso o evento grande. Esas solicitudes
+  se guardan como *pendientes de presupuesto* (no quedan confirmadas) y salen en `/admin`.
+- OTIVM no se ofrece: es un espacio de la zona de cocina y está cerrado fuera de temporada.
+- Si la hora pedida en el restaurante no está disponible o está completa, el bot ofrece
+  una lista con los horarios libres más cercanos.
 - **Mis reservas**: muestra las reservas futuras del número que escribe, y permite
   cancelarlas seleccionando una de una lista.
 - El estado de la conversación y las reservas se guardan en Turso, así que sobreviven a
   reinicios y redeploys del servicio.
+- El panel del equipo está en `/admin?key=ADMIN_KEY`.
 
 ## Límites de las capas gratuitas
 

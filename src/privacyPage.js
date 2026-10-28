@@ -9,7 +9,7 @@ function privacyHtml() {
   <p>Este servicio es un asistente automatizado de WhatsApp para gestionar reservas en ${config.business.name}.</p>
 
   <h2>Datos que recogemos</h2>
-  <p>Cuando escribes a nuestro número de WhatsApp, recogemos: tu número de teléfono, tu nombre (si nos lo indicas), y los detalles de la reserva (fecha, hora, número de personas).</p>
+  <p>Cuando escribes a nuestro número de WhatsApp, recogemos: tu número de teléfono, tu nombre (si nos lo indicas), los detalles de la reserva (fecha, hora, número de personas) y, si pides un menú de empresa o un evento, el nombre de la empresa, un email y lo que nos cuentes del acto.</p>
 
   <h2>Uso de los datos</h2>
   <p>Estos datos se usan únicamente para gestionar tu reserva y para poder contactarte en relación con ella. No se comparten con terceros ni se usan con fines publicitarios.</p>

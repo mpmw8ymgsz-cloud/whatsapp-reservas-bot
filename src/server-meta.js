@@ -24,6 +24,81 @@ function extractButtonId(message) {
   return null;
 }
 
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function waLink(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return esc(phone);
+  return `<a href="https://wa.me/${digits}">${esc(phone)}</a>`;
+}
+
+function typeLabel(type) {
+  if (type === 'evento_empresa') return '🎄 Empresa';
+  if (type === 'evento_congreso') return '🏛️ Congreso';
+  if (type === 'hotel') return '🛏️ Hotel';
+  if (type === 'otivm') return 'OTIVM (histórico)';
+  return '🍽️ Restaurante';
+}
+
+function renderAdminPage({ businessName, confirmed, pending }) {
+  const confirmedRows = confirmed
+    .map(
+      (r) =>
+        `<tr><td>#${esc(r.id)}</td><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${typeLabel(r.type)}</td>` +
+        `<td>${esc(r.name)}</td><td>${esc(r.party_size || '-')}</td><td>${esc(r.details || '')}</td>` +
+        `<td>${waLink(r.phone)}</td></tr>`
+    )
+    .join('');
+
+  const pendingRows = pending
+    .map(
+      (r) =>
+        `<tr><td>#${esc(r.id)}</td><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${typeLabel(r.type)}</td>` +
+        `<td>${esc(r.name)}</td><td>${esc(r.party_size || '-')}</td><td>${esc(r.details || '')}</td>` +
+        `<td>${waLink(r.phone)}</td><td>Pendiente de presupuesto</td></tr>`
+    )
+    .join('');
+
+  const confirmedLabel =
+    confirmed.length === 1 ? '1 reserva confirmada' : `${confirmed.length} reservas confirmadas`;
+  const pendingLabel =
+    pending.length === 1 ? '1 solicitud sin confirmar' : `${pending.length} solicitudes sin confirmar`;
+
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reservas - ${esc(businessName)}</title>
+<style>
+  body{font-family:sans-serif;margin:20px;background:#f6f5f0;color:#333}
+  h1,h2{color:#4a5233}
+  table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-bottom:28px}
+  th,td{padding:10px 12px;border-bottom:1px solid #e5e2d9;text-align:left;font-size:14px;vertical-align:top}
+  th{background:#4a5233;color:#fff}
+  tr:hover{background:#f0eee6}
+  td.details{word-break:break-word;max-width:420px}
+  a{color:#4a5233}
+</style></head>
+<body>
+  <h1>Reservas próximos 30 días · ${esc(businessName)}</h1>
+  <p>${confirmedLabel}. Actualiza la página para refrescar.</p>
+  <table>
+    <tr><th>Nº</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Nombre</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th></tr>
+    ${confirmedRows || '<tr><td colspan="8">Sin reservas próximas</td></tr>'}
+  </table>
+  <h2>Solicitudes de empresa y congresos · pendientes de presupuesto</h2>
+  <p>${pendingLabel}, también fuera de los 30 días.</p>
+  <table>
+    <tr><th>Nº</th><th>Fecha</th><th>Servicio</th><th>Tipo</th><th>Contacto</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th><th>Estado</th></tr>
+    ${pendingRows || '<tr><td colspan="9">Sin solicitudes pendientes</td></tr>'}
+  </table>
+</body></html>`;
+}
+
 function start(onMessage) {
   const app = express();
   app.use(express.json());
@@ -78,37 +153,10 @@ function start(onMessage) {
       const fromDate = today.toFormat('yyyy-MM-dd');
       const toDate = today.plus({ days: 30 }).toFormat('yyyy-MM-dd');
       const list = await db.getReservationsByDateRange(fromDate, toDate);
-
-      const icon = (t) => (t === 'otivm' ? '🌿 OTIVM' : t === 'hotel' ? '🛏️ Hotel' : '🍽️ Restaurante');
-      const rows = list
-        .map(
-          (r) =>
-            `<tr><td>#${r.id}</td><td>${r.date}</td><td>${r.time}</td><td>${icon(r.type)}</td>` +
-            `<td>${r.name}</td><td>${r.party_size || '-'}</td><td>${r.details || ''}</td>` +
-            `<td><a href="https://wa.me/${r.phone}">${r.phone}</a></td></tr>`
-        )
-        .join('');
-
-      res.type('html').send(`<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reservas - ${config.business.name}</title>
-<style>
-  body{font-family:sans-serif;margin:20px;background:#f6f5f0;color:#333}
-  h1{color:#4a5233}
-  table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.1)}
-  th,td{padding:10px 12px;border-bottom:1px solid #e5e2d9;text-align:left;font-size:14px}
-  th{background:#4a5233;color:#fff}
-  tr:hover{background:#f0eee6}
-  a{color:#4a5233}
-</style></head>
-<body>
-  <h1>Reservas próximos 30 días · ${config.business.name}</h1>
-  <p>${list.length} reservas confirmadas. Actualiza la página para refrescar.</p>
-  <table>
-    <tr><th>Nº</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Nombre</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th></tr>
-    ${rows || '<tr><td colspan="8">Sin reservas próximas</td></tr>'}
-  </table>
-</body></html>`);
+      const pending = await db.getPendingEventRequests();
+      res.type('html').send(
+        renderAdminPage({ businessName: config.business.name, confirmed: list, pending })
+      );
     } catch (err) {
       console.error('Error en /admin:', err);
       res.status(500).send('Error cargando reservas');
@@ -120,4 +168,4 @@ function start(onMessage) {
   });
 }
 
-module.exports = { start };
+module.exports = { start, renderAdminPage };
