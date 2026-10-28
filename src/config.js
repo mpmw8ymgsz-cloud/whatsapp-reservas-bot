@@ -10,7 +10,8 @@ module.exports = {
   metaToken: clean(process.env.META_TOKEN),
   phoneNumberId: clean(process.env.PHONE_NUMBER_ID),
   verifyToken: clean(process.env.VERIFY_TOKEN),
-  adminPhone: clean(process.env.ADMIN_PHONE) || null,
+  // Si ADMIN_PHONE no está en Render, avisar al WhatsApp Business de Nicolás Sánchez Monge.
+  adminPhone: clean(process.env.ADMIN_PHONE) || '34661724158',
   tursoUrl: clean(process.env.TURSO_DATABASE_URL),
   tursoAuthToken: clean(process.env.TURSO_AUTH_TOKEN),
 
