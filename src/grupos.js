@@ -2,6 +2,7 @@ const { DateTime } = require('luxon');
 const { parseDate, normalize } = require('./dateParser');
 const menus = require('./menusEmpresa');
 const conocimiento = require('./eventosConocimiento');
+const faq = require('./faqLlegada');
 
 const MONTHS = {
   enero: 1,
@@ -212,9 +213,10 @@ function empresaDetails(data, from) {
     `Tel: ${data.phoneContact}`,
     `WhatsApp: ${from}`,
     `Espacio: ${conocimiento.spaceHint(data.partySize)}`,
+    trasladoNota(data),
     'Estado: pendiente de presupuesto',
   ];
-  return parts.join(' | ');
+  return parts.filter(Boolean).join(' | ');
 }
 
 function congresoDetails(data, from) {
@@ -233,9 +235,20 @@ function congresoDetails(data, from) {
     `Tel: ${data.phoneContact}`,
     `WhatsApp: ${from}`,
     'Pendiente casa: nombre y aforo de cada salón; equipamiento audiovisual',
+    trasladoNota(data),
     'Estado: pendiente de presupuesto',
   ];
-  return parts.join(' | ');
+  return parts.filter(Boolean).join(' | ');
+}
+
+function trasladoNota(data) {
+  if (!data.transporte) return '';
+  return 'Traslado: interesado; se estudia según grupo y fecha, presupuesto aparte';
+}
+
+function trasladoLinea(data) {
+  if (!data.transporte) return '';
+  return '🚐 Traslado: se estudia según el tamaño del grupo y la fecha, y va en el presupuesto.\n';
 }
 
 function reviewEmpresa(data, business) {
@@ -250,6 +263,7 @@ function reviewEmpresa(data, business) {
     `✉️ ${data.email || 'sin email'}\n` +
     `📱 ${data.phoneContact}\n\n` +
     `${conocimiento.spaceHint(data.partySize)}\n` +
+    `${trasladoLinea(data)}` +
     `Bebida, mínimos y tarifa de grupo, si necesitáis hotel, se detallan en el presupuesto.\n\n` +
     `¿La envío así?`
   );
@@ -268,6 +282,7 @@ function reviewCongreso(data, business) {
     `📝 ${data.needsRaw}\n` +
     `✉️ ${data.email || 'sin email'}\n` +
     `📱 ${data.phoneContact}\n\n` +
+    `${trasladoLinea(data)}` +
     `El salón concreto y el audiovisual se detallan en el presupuesto.\n\n` +
     `¿La envío así?`
   );
@@ -442,6 +457,11 @@ function handle(ctx) {
       return startOverview(business);
     }
     return startHub(business);
+  }
+
+  if (!buttonId && data.stage) {
+    const interrupted = faqDuringFlow(data, raw, norm, business);
+    if (interrupted) return interrupted;
   }
 
   if (data.stage === 'hub') return handleHub(data, raw, norm, buttonId, business);
@@ -679,6 +699,80 @@ function handle(ctx) {
   }
 
   return startHub(business);
+}
+
+function stagePrompt(data) {
+  switch (data.stage) {
+    case 'company':
+      return '¿A nombre de qué empresa o entidad lo preparo?';
+    case 'contact':
+      return '¿Cómo te llamas?';
+    case 'type':
+      return '¿Qué tipo de evento es?';
+    case 'dates':
+      return '¿Qué día o días? Por ejemplo, 15/03/2027 o 10/03 al 12/03.';
+    case 'attendees':
+      return '¿Cuántas personas asistirían?';
+    case 'needs':
+      return '¿Qué necesitáis? Comidas, habitaciones para los asistentes, audiovisual, o lo que queráis anotar.';
+    case 'date':
+      return '¿Qué día de diciembre de 2026? Por ejemplo, 18/12.';
+    case 'pax':
+      return '¿Para cuántas personas? El espacio privado es desde 10.';
+    case 'reach':
+      return reachPrompt().body;
+    default:
+      return 'Seguimos cuando quieras.';
+  }
+}
+
+function faqDuringFlow(data, raw, norm, business) {
+  const location = faq.isLocationQuery(norm);
+  const transport = faq.isTransportQuery(norm);
+  if (!location && !transport) return null;
+  const hasNumber = /\d/.test(norm);
+  const collectingNumber = ['pax', 'attendees', 'date', 'dates', 'reach'].includes(data.stage);
+  if (!faq.shouldAnswerNow(raw, norm) || (hasNumber && collectingNumber)) {
+    if (transport && ['needs', 'pax', 'attendees'].includes(data.stage)) data.transporte = true;
+    return null;
+  }
+  if (transport) data.transporte = true;
+  const body = faq.reply({
+    location,
+    transport,
+    parking: faq.isParkingQuery(norm),
+    business,
+    inFlow: true,
+  });
+  if (data.stage === 'hub') {
+    return stay(data, [
+      text(body),
+      buttons('¿Seguimos con las comidas de Navidad o con un congreso?', [
+        { id: 'emp_menus', title: 'Comidas Navidad' },
+        { id: 'cong_start', title: 'Evento o congreso' },
+      ]),
+    ]);
+  }
+  if (data.stage === 'browse') {
+    return stay(data, [
+      text(body),
+      buttons('Cuando quieras, escribe *solicitar* y tomo los datos.', menus.OFFER_BUTTONS),
+    ]);
+  }
+  if (data.stage === 'service') {
+    return stay(data, [
+      text(body),
+      buttons('¿Lo hacéis en comida o en cena?', [
+        { id: 'emp_comida', title: 'Comida' },
+        { id: 'emp_cena', title: 'Cena' },
+      ]),
+    ]);
+  }
+  if (data.stage === 'review') {
+    const summary = data.flow === 'congreso' ? reviewCongreso(data, business) : reviewEmpresa(data, business);
+    return stay(data, [text(body), buttons(summary, REVIEW_BUTTONS)]);
+  }
+  return stay(data, [text(`${body}\n\n${stagePrompt(data)}`)]);
 }
 
 function reachPrompt() {
