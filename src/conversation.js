@@ -6,6 +6,7 @@ const { parseDate, parseTimeCandidates, getSlotsForDate, normalize } = require('
 const hotelApi = require('./hotelApi');
 const grupos = require('./grupos');
 const faq = require('./faqLlegada');
+const marketing = require('./marketing');
 
 const B = config.business;
 
@@ -46,12 +47,18 @@ function typeIcon(type) {
 
 async function handleIncoming(from, text, buttonId) {
   const normText = normalize(text);
+  const routedButton = marketing.routeButtonId(buttonId);
 
   // Comandos de administrador (solo desde el número del negocio)
   if (config.adminPhone && from === config.adminPhone) {
     if (['hoy', 'reservas hoy'].includes(normText)) return sendAdminList(from, 0);
     if (['manana', 'reservas manana'].includes(normText)) return sendAdminList(from, 1);
     if (['semana', 'reservas semana'].includes(normText)) return sendAdminList(from, 7);
+  }
+
+  // Baja de la plantilla de marketing (texto "BAJA" o botón "No me interesa").
+  if (marketing.isOptOut(normText, routedButton)) {
+    return acknowledgeMarketingOptOut(from, marketing.optOutReason(normText, routedButton));
   }
 
   const session = (await db.getSession(from)) || { step: STEP.IDLE, data: {} };
@@ -67,11 +74,11 @@ async function handleIncoming(from, text, buttonId) {
     return showMyReservations(from);
   }
 
-  if (session.step === STEP.GRUPO || grupos.isGrupoButton(buttonId)) {
+  if (session.step === STEP.GRUPO || grupos.isGrupoButton(routedButton)) {
     const data = session.step === STEP.GRUPO ? session.data : {};
     return dispatchGrupo(
       from,
-      grupos.handle({ data, text, buttonId, from, zone: B.timezone, business: B })
+      grupos.handle({ data, text, buttonId: routedButton, from, zone: B.timezone, business: B })
     );
   }
 
@@ -112,6 +119,12 @@ async function handleIncoming(from, text, buttonId) {
   if (session.step !== STEP.NAME) {
     const intent = grupos.classifyIncoming(normText);
     if (intent) return dispatchGrupo(from, grupos.startIntent(intent, B));
+    if (marketing.isPresupuestoText(normText)) {
+      return dispatchGrupo(
+        from,
+        grupos.handle({ data: {}, text, buttonId: 'emp_book', from, zone: B.timezone, business: B })
+      );
+    }
   }
 
   // Selección de experiencia desde el menú
@@ -611,6 +624,15 @@ async function handleCancelSelect(from, buttonId) {
   } else {
     await wa.sendText(from, 'No pude cancelar esa reserva.');
   }
+}
+
+async function acknowledgeMarketingOptOut(from, reason) {
+  try {
+    await db.markMarketingOptOut(from, reason);
+  } catch (err) {
+    console.error('[marketing] no se pudo guardar el opt-out:', err.message);
+  }
+  await wa.sendText(from, marketing.OPT_OUT_ACK);
 }
 
 async function dispatchGrupo(from, result) {

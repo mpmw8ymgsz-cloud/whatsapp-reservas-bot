@@ -12,6 +12,17 @@ module.exports = {
   verifyToken: clean(process.env.VERIFY_TOKEN),
   // Si ADMIN_PHONE no está en Render, avisar al WhatsApp Business de Nicolás Sánchez Monge.
   adminPhone: clean(process.env.ADMIN_PHONE) || '34661724158',
+  // Plantilla de marketing (comida de Navidad empresas). El envío es manual:
+  // nada de esto se manda al arrancar ni por cron.
+  marketing: {
+    templateName: clean(process.env.MARKETING_TEMPLATE_NAME) || 'comida_navidad_empresas_2026',
+    templateLang: clean(process.env.MARKETING_TEMPLATE_LANG) || 'es',
+    headerMediaId: clean(process.env.MARKETING_TEMPLATE_HEADER_MEDIA_ID) || null,
+    headerImageUrl:
+      clean(process.env.MARKETING_TEMPLATE_HEADER_IMAGE_URL) ||
+      clean(process.env.HEADER_IMAGE_URL) ||
+      null,
+  },
   tursoUrl: clean(process.env.TURSO_DATABASE_URL),
   tursoAuthToken: clean(process.env.TURSO_AUTH_TOKEN),
 
