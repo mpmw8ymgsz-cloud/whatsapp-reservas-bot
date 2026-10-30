@@ -71,6 +71,11 @@ const ready = (async () => {
   // Migraciones sobre tablas ya existentes (ignorar error si la columna ya existe)
   try { await execute(`ALTER TABLE reservations ADD COLUMN type TEXT DEFAULT 'restaurante'`); } catch (e) {}
   try { await execute(`ALTER TABLE reservations ADD COLUMN details TEXT`); } catch (e) {}
+  await execute(`CREATE TABLE IF NOT EXISTS marketing_optouts (
+    phone TEXT PRIMARY KEY,
+    reason TEXT,
+    created_at TEXT NOT NULL
+  )`);
 })().catch((err) => {
   console.error('Error inicializando la base de datos en Turso:', err.message);
   throw err;
@@ -182,5 +187,20 @@ module.exports = {
     const result = await execute('SELECT name FROM customers WHERE phone = ?', [phone]);
     const rows = rowsToObjects(result);
     return rows[0] ? rows[0].name : null;
+  },
+
+  async markMarketingOptOut(phone, reason) {
+    await ready;
+    await execute(
+      `INSERT INTO marketing_optouts (phone, reason, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(phone) DO UPDATE SET reason = excluded.reason, created_at = excluded.created_at`,
+      [phone, reason || 'baja', new Date().toISOString()]
+    );
+  },
+
+  async isMarketingOptOut(phone) {
+    await ready;
+    const result = await execute('SELECT phone FROM marketing_optouts WHERE phone = ?', [phone]);
+    return rowsToObjects(result).length > 0;
   },
 };

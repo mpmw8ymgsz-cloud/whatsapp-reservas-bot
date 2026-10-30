@@ -13,6 +13,7 @@ process.env.ADMIN_KEY = 'test-key';
 const sent = [];
 const sessions = new Map();
 const reservations = [];
+const optouts = new Map();
 
 const mockDb = {
   ready: Promise.resolve(),
@@ -50,6 +51,12 @@ const mockDb = {
   },
   async cancelReservation() {
     return false;
+  },
+  async markMarketingOptOut(phone, reason) {
+    optouts.set(phone, reason || 'baja');
+  },
+  async isMarketingOptOut(phone) {
+    return optouts.has(phone);
   },
 };
 
@@ -110,6 +117,7 @@ beforeEach(() => {
   sent.length = 0;
   reservations.length = 0;
   sessions.clear();
+  optouts.clear();
   Settings.now = () => new Date('2026-10-22T10:00:00+02:00').getTime();
 });
 
@@ -493,5 +501,47 @@ describe('cómo llegar y traslado', () => {
     assert.equal(reservations.at(-1).status, 'pending');
     assert.match(reservations.at(-1).details, /Traslado: interesado/);
     assert.match(reservations.at(-1).details, /menú a medida/);
+  });
+});
+
+describe('plantilla de Navidad: respuestas', () => {
+  it('BAJA confirma la baja y la guarda', async () => {
+    const messages = await say('34655500001', 'BAJA');
+    assert.match(joined(messages), /No te enviaremos más mensajes de este tipo/);
+    assert.equal(optouts.get('34655500001'), 'baja');
+    assert.equal(sessions.has('34655500001'), false);
+  });
+
+  it('el botón No me interesa (payload de la plantilla) es una baja', async () => {
+    const messages = await say('34655500002', 'No me interesa', 'mkt_optout');
+    assert.match(joined(messages), /No te enviaremos más mensajes de este tipo/);
+    assert.equal(optouts.get('34655500002'), 'mkt_optout');
+  });
+
+  it('si Meta devuelve el texto del botón como payload, también es una baja', async () => {
+    const messages = await say('34655500003', 'No me interesa', 'No me interesa');
+    assert.equal(optouts.get('34655500003'), 'mkt_optout');
+    assert.match(joined(messages), /menu/);
+  });
+
+  it('Pedir presupuesto con id emp_book abre la comida de Navidad de empresa', async () => {
+    const messages = await say('34655500004', 'Pedir presupuesto', 'emp_book');
+    assert.equal(sessions.get('34655500004').step, 'GRUPO');
+    assert.equal(sessions.get('34655500004').data.flow, 'empresa');
+    assert.match(joined(messages), /Comidas de Navidad para empresas/);
+    assert.equal(optouts.has('34655500004'), false);
+  });
+
+  it('el texto del botón Pedir presupuesto, si viene como payload, usa emp_book', async () => {
+    const messages = await say('34655500005', 'Pedir presupuesto', 'Pedir presupuesto');
+    assert.equal(sessions.get('34655500005').step, 'GRUPO');
+    assert.equal(sessions.get('34655500005').data.flow, 'empresa');
+    assert.match(joined(messages), /menú a medida/);
+  });
+
+  it('escribir Pedir presupuesto también abre el flujo de empresa', async () => {
+    const messages = await say('34655500006', 'Pedir presupuesto');
+    assert.equal(sessions.get('34655500006').step, 'GRUPO');
+    assert.match(joined(messages), /Comidas de Navidad para empresas/);
   });
 });

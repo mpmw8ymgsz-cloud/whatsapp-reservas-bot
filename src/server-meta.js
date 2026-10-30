@@ -1,10 +1,16 @@
+const crypto = require('crypto');
 const express = require('express');
 const config = require('./config');
 const wa = require('./whatsapp');
+const marketing = require('./marketing');
 const { privacyHtml } = require('./privacyPage');
 
 function extractText(message) {
   if (message.type === 'text') return message.text.body;
+  // Respuesta a un botón de plantilla (quick reply): type "button", no "interactive".
+  if (message.type === 'button' && message.button) {
+    return message.button.text || message.button.payload || '';
+  }
   if (message.type === 'interactive' && message.interactive.type === 'button_reply') {
     return message.interactive.button_reply.title;
   }
@@ -15,6 +21,9 @@ function extractText(message) {
 }
 
 function extractButtonId(message) {
+  if (message.type === 'button' && message.button) {
+    return message.button.payload || message.button.text || null;
+  }
   if (message.type === 'interactive' && message.interactive.type === 'button_reply') {
     return message.interactive.button_reply.id;
   }
@@ -22,6 +31,17 @@ function extractButtonId(message) {
     return message.interactive.list_reply.id;
   }
   return null;
+}
+
+function adminAuthorized(req) {
+  const adminKey = process.env.ADMIN_KEY;
+  if (!adminKey) return false;
+  const provided = req.get('x-admin-key') || req.query.key;
+  if (!provided) return false;
+  const left = Buffer.from(String(provided));
+  const right = Buffer.from(String(adminKey));
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
 }
 
 function esc(value) {
@@ -99,9 +119,17 @@ function renderAdminPage({ businessName, confirmed, pending }) {
 </body></html>`;
 }
 
-function start(onMessage) {
+function createApp(onMessage, deps = {}) {
   const app = express();
   app.use(express.json());
+  const sendTemplate = deps.sendTemplate || ((to, options) => wa.sendTemplate(to, options));
+  const isMarketingOptOut =
+    deps.isMarketingOptOut || ((phone) => require('./db').isMarketingOptOut(phone));
+  const delayMs = Object.prototype.hasOwnProperty.call(deps, 'delayMs')
+    ? deps.delayMs
+    : marketing.DEFAULT_DELAY_MS;
+  const sleep = deps.sleep || marketing.sleep;
+  let campaignInFlight = false;
 
   app.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -140,6 +168,35 @@ function start(onMessage) {
   app.get('/', (req, res) => res.send('Bot de reservas activo (modo Meta Cloud API)'));
   app.get('/privacy', (req, res) => res.type('html').send(privacyHtml()));
 
+  // Envío manual de la plantilla de marketing. No hay cron ni disparo al arrancar.
+  app.post('/admin/marketing/send', async (req, res) => {
+    if (!adminAuthorized(req)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Acceso denegado. Falta la clave (cabecera x-admin-key o ?key=).',
+      });
+    }
+    if (campaignInFlight) {
+      return res.status(429).json({ ok: false, error: 'Ya hay un envío en curso. Espera a que termine.' });
+    }
+    campaignInFlight = true;
+    try {
+      const result = await marketing.sendCampaign(req.body || {}, {
+        template: marketing.templateOptions(),
+        sendOne: sendTemplate,
+        isOptedOut: isMarketingOptOut,
+        delayMs,
+        sleep,
+      });
+      res.status(result.status).json(result.body);
+    } catch (err) {
+      console.error('[marketing] Error en el envío:', err?.message || err);
+      res.status(500).json({ ok: false, error: 'Error enviando la plantilla' });
+    } finally {
+      campaignInFlight = false;
+    }
+  });
+
   // Panel de reservas para el equipo (protegido con clave: /admin?key=...)
   app.get('/admin', async (req, res) => {
     const adminKey = process.env.ADMIN_KEY;
@@ -163,9 +220,14 @@ function start(onMessage) {
     }
   });
 
-  app.listen(config.port, () => {
+  return app;
+}
+
+function start(onMessage) {
+  const app = createApp(onMessage);
+  app.listen(config.port, '0.0.0.0', () => {
     console.log(`Servidor escuchando en el puerto ${config.port} (proveedor: meta)`);
   });
 }
 
-module.exports = { start, renderAdminPage };
+module.exports = { start, createApp, renderAdminPage, extractText, extractButtonId, adminAuthorized };

@@ -136,6 +136,74 @@ Edita [src/config.js](src/config.js), haz commit y push (Render vuelve a despleg
   reinicios y redeploys del servicio.
 - El panel del equipo está en `/admin?key=ADMIN_KEY`.
 
+## Plantilla de Navidad para empresas (envío manual)
+
+El bot puede mandar la plantilla de marketing de la comida de Navidad **solo cuando tú lo pides**.
+Desplegar, reiniciar o el cron no envían nada: no hay cron. Cada llamada manda como mucho 20
+números, de uno en uno, con una pausa de 1 segundo, y se salta quien haya pedido la baja.
+
+### 1. Crear la plantilla en Meta y esperar a APPROVED
+
+En el administrador de WhatsApp (plantillas de mensaje), crea una plantilla antes de enviar:
+
+- **Nombre:** `comida_navidad_empresas_2026` (o el valor de `MARKETING_TEMPLATE_NAME`)
+- **Categoría:** Marketing
+- **Idioma:** Spanish (`es`)
+- **Cabecera:** Image
+- **Cuerpo** (sin variables):
+
+  Hola, os escribimos desde Hostería Don Fadrique (Alba de Tormes) por si este año queréis la comida de Navidad de empresa con nosotros: menú a medida desde 55 € + IVA, espacios para grupos y congresos. Si os interesa, respondéis a este WhatsApp y os preparamos un presupuesto sin compromiso.
+
+- **Pie** (el borrador lleva esta errata, a propósito): `Para no recibir más mensajes de este tipo, responded BAJA.`
+- **Botones de respuesta rápida**, en este orden:
+  1. `Pedir presupuesto`
+  2. `No me interesa`
+
+El envío desde el bot adjunta estos payloads, que son los ids que entiende la conversación:
+
+| Botón | Payload | Qué hace |
+| --- | --- | --- |
+| Pedir presupuesto | `emp_book` | Abre el flujo de grupos de la comida de Navidad de empresa (el mismo botón que en el chat). |
+| No me interesa | `mkt_optout` | Confirma la baja y la guarda. No vuelve a recibir esta plantilla. |
+
+Si la plantilla se manda desde el administrador de Meta y el webhook trae el texto del botón
+como payload (`Pedir presupuesto` o `No me interesa`), el bot lo traduce a esos mismos ids.
+Quien escriba **BAJA** (o "No me interesa") también queda dado de baja.
+
+### 2. Variables de entorno
+
+- `MARKETING_TEMPLATE_NAME` (por defecto `comida_navidad_empresas_2026`)
+- `MARKETING_TEMPLATE_LANG` (por defecto `es`)
+- `MARKETING_TEMPLATE_HEADER_MEDIA_ID` o `MARKETING_TEMPLATE_HEADER_IMAGE_URL` (también vale `HEADER_IMAGE_URL`)
+
+La cabecera es opcional en el código. Si la plantilla aprobada lleva imagen, define uno de los
+dos antes de enviar; si no, Meta rechaza el mensaje y la respuesta lo dice número a número.
+Con los dos definidos se usa el media id. `ADMIN_KEY` es la misma clave que `/admin`.
+
+### 3. Enviar (solo a mano, con la clave)
+
+Cuando el estado en Meta sea **APPROVED**. La cabecera `x-admin-key` no deja la clave en la URL:
+
+```bash
+curl -X POST "https://tu-app.onrender.com/admin/marketing/send" \
+  -H "Content-Type: application/json" \
+  -H "x-admin-key: TU_ADMIN_KEY" \
+  -d '{"phone":"34600000000"}'
+```
+
+Una lista corta (máximo 20). No es un envío masivo:
+
+```bash
+curl -X POST "https://tu-app.onrender.com/admin/marketing/send?key=TU_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"phones":["34600000000","34600000001"]}'
+```
+
+El número va en formato internacional, sin `+` (si lo trae, se quita). Un número repetido
+en la misma llamada se manda una sola vez. La respuesta trae `ok` y el id de Meta, o el
+error de Meta (plantilla inexistente, aún no aprobada, parámetros que no cuadran), por cada
+número. Quien esté en la tabla `marketing_optouts` se omite.
+
 ## Límites de las capas gratuitas
 
 - **Meta Cloud API**: gratis hasta 1.000 conversaciones de servicio al mes (cada
