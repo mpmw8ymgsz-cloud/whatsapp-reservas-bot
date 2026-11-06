@@ -116,13 +116,46 @@ describe('payload de la plantilla', () => {
   });
 });
 
+const DEFAULT_HEADER_IMAGE_URL =
+  'https://raw.githubusercontent.com/mpmw8ymgsz-cloud/whatsapp-reservas-bot/main/assets/marketing/header_banquete.jpg';
+
 describe('config de la plantilla', () => {
-  it('usa el nombre y el idioma por defecto', () => {
+  it('guarda el JPEG de la cabecera en el repo', () => {
+    const image = fs.readFileSync(path.join(root, 'assets/marketing/header_banquete.jpg'));
+    assert.ok(image.length > 10_000);
+    assert.equal(image[0], 0xff);
+    assert.equal(image[1], 0xd8);
+    assert.equal(image[2], 0xff);
+  });
+
+  it('usa el nombre y el idioma por defecto y la imagen pública si no hay cabecera', () => {
     const marketingConfig = readMarketing();
     assert.equal(marketingConfig.templateName, 'comida_navidad_empresas_2026');
     assert.equal(marketingConfig.templateLang, 'es');
     assert.equal(marketingConfig.headerMediaId, null);
-    assert.equal(marketingConfig.headerImageUrl, null);
+    assert.equal(marketingConfig.headerImageUrl, DEFAULT_HEADER_IMAGE_URL);
+
+    const blank = readMarketing({
+      MARKETING_TEMPLATE_HEADER_MEDIA_ID: ' ',
+      MARKETING_TEMPLATE_HEADER_IMAGE_URL: '',
+      HEADER_IMAGE_URL: '   ',
+    });
+    assert.equal(blank.headerMediaId, null);
+    assert.equal(blank.headerImageUrl, DEFAULT_HEADER_IMAGE_URL);
+
+    const options = marketing.templateOptions({ marketing: marketingConfig });
+    assert.equal(options.name, 'comida_navidad_empresas_2026');
+    assert.equal(options.language, 'es');
+    assert.equal(options.headerMediaId, null);
+    assert.equal(options.headerImageUrl, DEFAULT_HEADER_IMAGE_URL);
+    assert.equal(options.buttons[0].payload, 'emp_book');
+    assert.equal(options.buttons[1].payload, 'mkt_optout');
+
+    const payload = buildTemplatePayload('34600000000', options);
+    assert.deepEqual(payload.template.components[0], {
+      type: 'header',
+      parameters: [{ type: 'image', image: { link: DEFAULT_HEADER_IMAGE_URL } }],
+    });
   });
 
   it('acepta el media id y HEADER_IMAGE_URL', () => {

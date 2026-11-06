@@ -176,9 +176,9 @@ Quien escriba **BAJA** (o "No me interesa") también queda dado de baja.
 - `MARKETING_TEMPLATE_LANG` (por defecto `es`)
 - `MARKETING_TEMPLATE_HEADER_MEDIA_ID` o `MARKETING_TEMPLATE_HEADER_IMAGE_URL` (también vale `HEADER_IMAGE_URL`)
 
-La cabecera es opcional en el código. Si la plantilla aprobada lleva imagen, define uno de los
-dos antes de enviar; si no, Meta rechaza el mensaje y la respuesta lo dice número a número.
-Con los dos definidos se usa el media id. `ADMIN_KEY` es la misma clave que `/admin`.
+Si no defines ninguna, el envío usa la imagen del repositorio
+(`assets/marketing/header_banquete.jpg`). Con los dos definidos se usa el media id.
+`ADMIN_KEY` es la misma clave que `/admin`.
 
 ### 3. Enviar (solo a mano, con la clave)
 
