@@ -4,6 +4,11 @@ function clean(value) {
   return value ? value.trim() : value;
 }
 
+// Cabecera IMAGE de comida_navidad_empresas_2026. Pública en main para que
+// Meta pueda descargarla cuando no hay media id ni URL en el entorno.
+const DEFAULT_MARKETING_HEADER_IMAGE_URL =
+  'https://raw.githubusercontent.com/mpmw8ymgsz-cloud/whatsapp-reservas-bot/main/assets/marketing/header_banquete.jpg';
+
 module.exports = {
   port: process.env.PORT || 3000,
   provider: process.env.WHATSAPP_PROVIDER || 'meta', // 'meta' (oficial) o 'baileys' (no oficial, vía QR)
@@ -21,7 +26,7 @@ module.exports = {
     headerImageUrl:
       clean(process.env.MARKETING_TEMPLATE_HEADER_IMAGE_URL) ||
       clean(process.env.HEADER_IMAGE_URL) ||
-      null,
+      DEFAULT_MARKETING_HEADER_IMAGE_URL,
   },
   tursoUrl: clean(process.env.TURSO_DATABASE_URL),
   tursoAuthToken: clean(process.env.TURSO_AUTH_TOKEN),
