@@ -35,6 +35,7 @@ function stampId(replies, id) {
 
 function classifyIncoming(norm) {
   if (!norm) return null;
+  if (conocimiento.isBodaTopic(norm)) return { kind: 'boda' };
   if (conocimiento.isCongresoTopic(norm)) return { kind: 'congreso' };
   if (menus.isEmpresaTopic(norm)) return { kind: 'empresa_overview' };
   if (conocimiento.isHubTopic(norm)) return { kind: 'hub' };
@@ -42,7 +43,10 @@ function classifyIncoming(norm) {
 }
 
 function isGrupoButton(buttonId) {
-  return typeof buttonId === 'string' && (buttonId.startsWith('emp_') || buttonId.startsWith('cong_'));
+  return (
+    typeof buttonId === 'string' &&
+    (buttonId.startsWith('emp_') || buttonId.startsWith('cong_') || buttonId.startsWith('boda_'))
+  );
 }
 
 function base(flow, stage, extra) {
@@ -63,20 +67,44 @@ function startCongreso(business) {
   };
 }
 
+function startBoda(business) {
+  return {
+    data: base('boda', 'couple'),
+    replies: [
+      text(
+        `${conocimiento.bodaIntro(business.name)}\n\n` +
+          '¿Cómo se llaman los novios, o el nombre de contacto?'
+      ),
+    ],
+  };
+}
+
+const HUB_BUTTONS = [
+  { id: 'boda_start', title: 'Boda' },
+  { id: 'emp_menus', title: 'Comidas Navidad' },
+  { id: 'cong_start', title: 'Evento o congreso' },
+];
+
+const HUB_FOLLOWUP = '¿Seguimos con una boda, las comidas de Navidad o un congreso?';
+
+const CEREMONY_BUTTONS = [
+  { id: 'boda_si', title: 'Sí, en el jardín' },
+  { id: 'boda_no', title: 'No' },
+  { id: 'boda_ns', title: 'Aún no lo sabemos' },
+];
+
 function startHub(business) {
   return {
     data: base('hub', 'hub'),
     replies: [
       buttons(
         `🎉 *Eventos en ${business.name}*\n\n` +
-          `Puedo ayudarte con dos cosas:\n` +
-          `• comidas de Navidad para empresas, con menú a medida (desde 55 € + IVA por persona);\n` +
-          `• un evento grande o un congreso (la especialidad de la casa: de 500 a 700 personas entre todos los espacios).\n\n` +
-          `Ninguna de las dos queda confirmada por aquí: el equipo envía el presupuesto.`,
-        [
-          { id: 'emp_menus', title: 'Comidas Navidad' },
-          { id: 'cong_start', title: 'Evento o congreso' },
-        ]
+          `Puedo ayudarte con tres cosas:\n` +
+          `• una boda, con la hostería en exclusiva;\n` +
+          `• comidas de Navidad para empresas, menú a medida (desde 55 € + IVA por persona);\n` +
+          `• un evento de empresa o un congreso (de 500 a 700 personas entre todos los espacios).\n\n` +
+          `Nada queda confirmado por aquí: el equipo envía el presupuesto.`,
+        HUB_BUTTONS
       ),
     ],
   };
@@ -84,6 +112,7 @@ function startHub(business) {
 
 function startIntent(intent, business) {
   if (!intent) return startHub(business);
+  if (intent.kind === 'boda') return startBoda(business);
   if (intent.kind === 'empresa_overview' || intent.kind === 'empresa_detail') return startOverview(business);
   if (intent.kind === 'congreso') return startCongreso(business);
   return startHub(business);
@@ -335,7 +364,96 @@ function adminCongreso(data, from) {
   );
 }
 
+function bodaDetails(data, from) {
+  const parts = [
+    `Pareja/contacto: ${data.contactName}`,
+    `Fecha: ${data.dateLabel}`,
+    `Invitados aprox.: ${data.partySize}`,
+    `Ceremonia en la finca: ${data.ceremony}`,
+    `Necesidades: ${data.needsRaw}`,
+    `Email: ${data.email || '—'}`,
+    `Tel: ${data.phoneContact}`,
+    `WhatsApp: ${from}`,
+    trasladoNota(data),
+    'Estado: pendiente de presupuesto',
+  ];
+  return parts.filter(Boolean).join(' | ');
+}
+
+function reviewBoda(data, business) {
+  return (
+    `*Solicitud de boda*\n` +
+    `Si la envías, el equipo de ${business.name} prepara el presupuesto. La fecha no queda reservada.\n\n` +
+    `💍 ${data.contactName}\n` +
+    `📅 ${data.dateLabel}\n` +
+    `👥 ${data.partySize} invitados, aprox.\n` +
+    `💒 Ceremonia en la finca: ${data.ceremony}\n` +
+    `📝 ${data.needsRaw}\n` +
+    `✉️ ${data.email || 'sin email'}\n` +
+    `📱 ${data.phoneContact}\n\n` +
+    `${trasladoLinea(data)}` +
+    `Menú a medida. El precio se concreta en el presupuesto.\n\n` +
+    `¿La envío así?`
+  );
+}
+
+function thanksBoda(data, business) {
+  return (
+    `Gracias. He anotado la solicitud nº {{id}} para *${data.contactName}*.\n\n` +
+    `📅 ${data.dateLabel} · ${data.partySize} invitados\n` +
+    `💒 Ceremonia en la finca: ${data.ceremony}\n\n` +
+    `Queda *pendiente de presupuesto*. En breve os escribe el equipo de ${business.name}. La fecha no queda reservada hasta entonces.\n\n` +
+    `📍 ${business.address}\n📞 ${business.phone}`
+  );
+}
+
+function adminBoda(data, from) {
+  return (
+    `💍 SOLICITUD BODA pendiente de presupuesto #{{id}}\n` +
+    `Contacto: ${data.contactName}\n` +
+    `${data.dateLabel} · ${data.partySize} invitados\n` +
+    `Ceremonia en la finca: ${data.ceremony}\n` +
+    `Necesidades: ${data.needsRaw}\n` +
+    `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`
+  );
+}
+
+function alertLine(kind, data) {
+  const when = data.dateEndLabel ? `${data.dateLabel} al ${data.dateEndLabel}` : data.dateLabel;
+  const people = data.partySize ? `${data.partySize} ${kind === 'Boda' ? 'invitados' : 'personas'}` : '';
+  const contact = data.email || data.phoneContact || '';
+  return [kind, data.contactName, when, people, contact, '#{{id}}'].filter(Boolean).join(' · ');
+}
+
+function reviewFor(data, business) {
+  if (data.flow === 'congreso') return reviewCongreso(data, business);
+  if (data.flow === 'boda') return reviewBoda(data, business);
+  return reviewEmpresa(data, business);
+}
+
+function thanksFor(data, business) {
+  if (data.flow === 'congreso') return thanksCongreso(data, business);
+  if (data.flow === 'boda') return thanksBoda(data, business);
+  return thanksEmpresa(data, business);
+}
+
 function reservationFor(data, from) {
+  if (data.flow === 'boda') {
+    return {
+      record: {
+        phone: from,
+        name: data.contactName,
+        partySize: data.partySize,
+        date: data.date,
+        time: 'boda',
+        type: 'evento_boda',
+        status: 'pending',
+        details: bodaDetails(data, from),
+      },
+      adminText: adminBoda(data, from),
+      alertSummary: alertLine('Boda', data),
+    };
+  }
   if (data.flow === 'congreso') {
     return {
       record: {
@@ -349,6 +467,7 @@ function reservationFor(data, from) {
         details: congresoDetails(data, from),
       },
       adminText: adminCongreso(data, from),
+      alertSummary: alertLine('Congreso', data),
     };
   }
   return {
@@ -363,6 +482,7 @@ function reservationFor(data, from) {
       details: empresaDetails(data, from),
     },
     adminText: adminEmpresa(data, from),
+    alertSummary: alertLine('Navidad empresa', data),
   };
 }
 
@@ -372,9 +492,54 @@ function stay(data, replies) {
 
 function sideOr(data, raw, prompt) {
   if (!looksLikeQuestion(raw)) return null;
-  const side = conocimiento.answerSideQuestion(normalize(raw));
+  const side = conocimiento.answerSideQuestion(normalize(raw), data.flow);
   if (!side) return null;
   return stay(data, [text(`${side}\n\n${prompt}`)]);
+}
+
+function looksLikeFreshBodaAsk(norm) {
+  return /quiero|quisiera|queremos|querria|gustaria|informacion|reserv|presupuesto|banquete|casar|una boda|de boda|para bodas|celebracion/.test(
+    norm
+  );
+}
+
+function wantsBodaNow(data, norm, buttonId) {
+  const collecting = data.flow === 'boda' && data.stage && !['hub', 'browse'].includes(data.stage);
+  if (collecting) return false;
+  if (buttonId === 'boda_start') return true;
+  if (!conocimiento.isBodaTopic(norm)) return false;
+  if (!data.stage || data.stage === 'hub' || data.stage === 'browse') return true;
+  return looksLikeFreshBodaAsk(norm);
+}
+
+function wantsCongresoNow(data, norm, buttonId) {
+  const collecting = data.flow === 'congreso' && data.stage && !['hub', 'browse'].includes(data.stage);
+  if (buttonId === 'cong_start') return !collecting;
+  if (conocimiento.isBodaTopic(norm) || menus.isEmpresaTopic(norm)) return false;
+  if (!conocimiento.isCongresoTopic(norm)) return false;
+  return !data.stage || data.stage === 'hub' || data.stage === 'browse';
+}
+
+function beginBoda(business, raw, norm) {
+  const started = startBoda(business);
+  const location = faq.isLocationQuery(norm);
+  const transport = faq.isTransportQuery(norm);
+  if (transport) started.data.transporte = true;
+  if ((location || transport) && faq.shouldAnswerNow(raw, norm)) {
+    started.replies = [
+      text(
+        faq.reply({
+          location,
+          transport,
+          parking: faq.isParkingQuery(norm),
+          business,
+          inFlow: true,
+        })
+      ),
+      ...started.replies,
+    ];
+  }
+  return started;
 }
 
 function askCompany(data) {
@@ -396,9 +561,10 @@ function wantsEmpresaBooking(norm, buttonId) {
 
 function handleBrowse(data, raw, norm, buttonId, business) {
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
+  if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business);
   if (buttonId === 'emp_overview' || buttonId === 'emp_menus') return startOverview(business);
   if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
-  const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm) : null;
+  const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
   if (side && !wantsEmpresaBooking(norm, buttonId)) {
     return stay(data, [
       text(side),
@@ -412,19 +578,12 @@ function handleBrowse(data, raw, norm, buttonId, business) {
 }
 
 function handleHub(data, raw, norm, buttonId, business) {
-  if (buttonId === 'emp_menus' || menus.isEmpresaTopic(norm)) {
-    return startOverview(business);
-  }
+  if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business);
   if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
-  const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm) : null;
+  if (buttonId === 'emp_menus' || menus.isEmpresaTopic(norm)) return startOverview(business);
+  const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
   if (side) {
-    return stay(data, [
-      text(side),
-      buttons('¿Seguimos con las comidas de Navidad o con un congreso?', [
-        { id: 'emp_menus', title: 'Comidas Navidad' },
-        { id: 'cong_start', title: 'Evento o congreso' },
-      ]),
-    ]);
+    return stay(data, [text(side), buttons(HUB_FOLLOWUP, HUB_BUTTONS)]);
   }
   return startHub(business);
 }
@@ -433,6 +592,226 @@ function validFuture(dt, zone, yearsAhead) {
   const now = DateTime.now().setZone(zone).startOf('day');
   const limit = now.plus({ years: yearsAhead }).endOf('year');
   return dt >= now && dt <= limit;
+}
+
+function dated(dt, approximate) {
+  const label = labelDate(dt);
+  return {
+    date: dt.toFormat('yyyy-MM-dd'),
+    dateEnd: null,
+    dateLabel: approximate ? `${label} (aprox.)` : label,
+    approximate,
+  };
+}
+
+function monthStart(month, explicitYear, zone) {
+  const now = DateTime.now().setZone(zone).startOf('day');
+  let year = explicitYear || now.year;
+  let dt = DateTime.fromObject({ year, month, day: 1 }, { zone }).startOf('day');
+  if (!explicitYear && dt < now.startOf('month')) dt = dt.plus({ years: 1 });
+  return dt.isValid ? dt : null;
+}
+
+function parseWeddingWhen(textValue, zone) {
+  const raw = String(textValue || '').trim();
+  const t = normalize(raw);
+  if (!t) return null;
+  const hasApproxWord = /aprox|aproximad|sobre el|hacia|alrededor|mas o menos/.test(t);
+
+  const range = parseRange(raw, zone);
+  if (range) {
+    const label = range.end ? `${labelDate(range.start)} al ${labelDate(range.end)}` : labelDate(range.start);
+    return {
+      date: range.start.toFormat('yyyy-MM-dd'),
+      dateEnd: range.end ? range.end.toFormat('yyyy-MM-dd') : null,
+      dateLabel: hasApproxWord ? `${label} (aprox.)` : label,
+      approximate: hasApproxWord,
+    };
+  }
+
+  const embedded = t.match(/(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/);
+  if (embedded) {
+    const one = parseFlexibleDate(embedded[1], zone);
+    if (one) return dated(one, hasApproxWord);
+  }
+
+  const monthMatch = t.match(
+    /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b(?:\s*(?:de\s*)?(\d{4}))?/
+  );
+  if (monthMatch) {
+    const dt = monthStart(MONTHS[monthMatch[1]], monthMatch[2] ? parseInt(monthMatch[2], 10) : null, zone);
+    if (!dt) return null;
+    return {
+      date: dt.toFormat('yyyy-MM-dd'),
+      dateEnd: null,
+      dateLabel: `${dt.setLocale('es').toFormat("LLLL 'de' yyyy")} (aprox.)`,
+      approximate: true,
+    };
+  }
+
+  const seasonMatch = t.match(/\b(primavera|verano|otono|invierno)\b(?:\s*(?:de\s*)?(\d{4}))?/);
+  if (seasonMatch) {
+    const seasonMonth = { primavera: 3, verano: 6, otono: 9, invierno: 12 }[seasonMatch[1]];
+    const dt = monthStart(seasonMonth, seasonMatch[2] ? parseInt(seasonMatch[2], 10) : null, zone);
+    if (!dt) return null;
+    const seasonName = { primavera: 'primavera', verano: 'verano', otono: 'otoño', invierno: 'invierno' }[seasonMatch[1]];
+    return {
+      date: dt.toFormat('yyyy-MM-dd'),
+      dateEnd: null,
+      dateLabel: `${seasonName} de ${dt.year} (aprox.)`,
+      approximate: true,
+    };
+  }
+
+  if (/ano que viene|proximo ano|el ano proximo/.test(t)) {
+    const year = DateTime.now().setZone(zone).year + 1;
+    return { date: `${year}-01-01`, dateEnd: null, dateLabel: `${year} (aprox.)`, approximate: true };
+  }
+
+  const yearOnly = t.match(/\b(20\d{2})\b/);
+  if (yearOnly) {
+    const year = parseInt(yearOnly[1], 10);
+    return { date: `${year}-01-01`, dateEnd: null, dateLabel: `${year} (aprox.)`, approximate: true };
+  }
+
+  if (
+    /por concretar|sin fecha|fecha abierta|por decidir|aun no|todavia no|no lo sabemos|no sabemos|mas adelante|ya veremos|cuando se sepa/.test(
+      t
+    )
+  ) {
+    return { date: 'por concretar', dateEnd: null, dateLabel: 'fecha por concretar', approximate: true };
+  }
+
+  return null;
+}
+
+function acceptableWhen(parsed, zone) {
+  if (!parsed) return false;
+  if (parsed.date === 'por concretar') return true;
+  const start = DateTime.fromISO(parsed.date, { zone }).startOf('day');
+  if (!start.isValid) return false;
+  const end = parsed.dateEnd ? DateTime.fromISO(parsed.dateEnd, { zone }).startOf('day') : null;
+  if (parsed.dateEnd && (!end || !end.isValid || end < start)) return false;
+  const now = DateTime.now().setZone(zone).startOf('day');
+  const limit = now.plus({ years: 2 }).endOf('year');
+  if (parsed.approximate) {
+    const last = (end || start).endOf('month');
+    return last >= now && start <= limit && (!end || end <= limit);
+  }
+  if (start < now || start > limit) return false;
+  if (end && end > limit) return false;
+  return true;
+}
+
+function parseCeremony(textValue, buttonId) {
+  if (buttonId === 'boda_si') return 'sí';
+  if (buttonId === 'boda_no') return 'no';
+  if (buttonId === 'boda_ns') return 'aún no';
+  const n = normalize(textValue);
+  if (!n) return null;
+  if (/aun no|todavia no|no lo sabemos|no sabemos|por decidir|quizas|quiza|ya veremos/.test(n)) return 'aún no';
+  if (/sin ceremonia|en otro sitio|fuera de la|ceremonia no/.test(n)) return 'no';
+  if (/^no\b/.test(n)) return 'no';
+  if (/en el jardin/.test(n) || /^si\b/.test(n)) return 'sí';
+  return null;
+}
+
+function handleBodaStages(data, raw, norm, buttonId, business, zone) {
+  if (data.flow !== 'boda') return null;
+
+  if (data.stage === 'couple') {
+    const prompt = '¿Cómo se llaman los novios, o el nombre de contacto?';
+    const side = sideOr(data, raw, prompt);
+    if (side) return side;
+    const contactName = raw.trim();
+    if (contactName.length < 2) return stay(data, [text('Dime los nombres, aunque sea el de la persona de contacto.')]);
+    return {
+      data: { ...data, contactName, stage: 'wdate' },
+      customerName: contactName,
+      replies: [
+        text(
+          '¿Qué fecha tenéis en mente, aunque sea aproximada? Sirve un día (12/06/2027), un mes (junio de 2027) o una época (verano de 2027). Si aún no la hay, escribe *por concretar*.'
+        ),
+      ],
+    };
+  }
+
+  if (data.stage === 'wdate') {
+    const prompt = '¿Qué fecha tenéis, aunque sea aproximada? Por ejemplo, 12/06/2027, junio de 2027 o verano de 2027.';
+    const side = sideOr(data, raw, prompt);
+    if (side) return side;
+    const when = parseWeddingWhen(raw, zone);
+    if (!when || !acceptableWhen(when, zone)) {
+      return stay(data, [
+        text('No entendí esa fecha, ya pasó o queda a más de dos años. Prueba con 12/06/2027, junio de 2027, o escribe *por concretar*.'),
+      ]);
+    }
+    return stay(
+      {
+        ...data,
+        date: when.date,
+        dateLabel: when.dateLabel,
+        dateEnd: when.dateEnd,
+        dateApproximate: when.approximate,
+        stage: 'guests',
+      },
+      [text(`${when.dateLabel}. ¿Cuántos invitados, aproximadamente? Los espacios, juntos, admiten de 500 a 700.`)]
+    );
+  }
+
+  if (data.stage === 'guests') {
+    const prompt = '¿Cuántos invitados, aproximadamente?';
+    const side = sideOr(data, raw, prompt);
+    if (side) return side;
+    const n = parseParty(raw);
+    if (!n) return stay(data, [text('Dime un número aproximado de invitados, por ejemplo 120.')]);
+    if (n > conocimiento.MAX_AFORO) {
+      return stay(data, [
+        text(
+          `Los espacios, juntos, admiten de 500 a 700 personas. No puedo anotar ${n}. Dime un número dentro de ese aforo.`
+        ),
+      ]);
+    }
+    return stay(
+      { ...data, partySize: n, stage: 'ceremony' },
+      [buttons(`${n} invitados. ¿La ceremonia sería en el jardín de la hostería?`, CEREMONY_BUTTONS)]
+    );
+  }
+
+  if (data.stage === 'ceremony') {
+    const ceremony = parseCeremony(raw, buttonId);
+    if (!ceremony) {
+      return stay(data, [buttons('¿La ceremonia sería en el jardín de la hostería?', CEREMONY_BUTTONS)]);
+    }
+    return stay(
+      { ...data, ceremony, stage: 'wneeds' },
+      [
+        text(
+          '¿Qué más necesitáis? Habitaciones para los invitados, música, autobús u otra cosa. Si no hace falta nada más, escribe *nada*.'
+        ),
+      ]
+    );
+  }
+
+  if (data.stage === 'wneeds') {
+    const prompt = '¿Qué más necesitáis? Habitaciones, música, autobús… o escribe *nada*.';
+    if (
+      looksLikeQuestion(raw) &&
+      conocimiento.answerSideQuestion(norm, 'boda') &&
+      raw.trim().length < 80 &&
+      !/,| y /.test(norm)
+    ) {
+      return stay(data, [text(`${conocimiento.answerSideQuestion(norm, 'boda')}\n\n${prompt}`)]);
+    }
+    let needsRaw = raw.trim();
+    if (/^(nada|no|ninguna|ninguno|solo eso|nada mas|no hace falta)$/.test(norm)) needsRaw = 'sin necesidades extra';
+    if (needsRaw.length < 2) return stay(data, [text(prompt)]);
+    const next = { ...data, needsRaw, stage: 'reach' };
+    if (/autobus|autocar|shuttle|traslado|transporte|\bbus\b/.test(norm)) next.transporte = true;
+    return stay(next, [reachPrompt()]);
+  }
+
+  return null;
 }
 
 function handle(ctx) {
@@ -444,7 +823,11 @@ function handle(ctx) {
   const buttonId = ctx.buttonId || null;
   const data = { ...(ctx.data || {}) };
 
+  if (wantsBodaNow(data, norm, buttonId)) return beginBoda(business, raw, norm);
+  if (wantsCongresoNow(data, norm, buttonId)) return startCongreso(business);
+
   if (!data.stage) {
+    if (buttonId === 'boda_start') return startBoda(business);
     if (buttonId === 'cong_start') return startCongreso(business);
     if (
       buttonId === 'emp_menus' ||
@@ -469,9 +852,17 @@ function handle(ctx) {
 
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
   if (buttonId === 'emp_fix' || (data.stage === 'review' && /corregir|repetir|cambiar/.test(norm))) {
+    if (data.flow === 'boda') {
+      return stay({ flow: 'boda', stage: 'couple' }, [
+        text('De acuerdo, lo repetimos. ¿Cómo se llaman los novios, o el nombre de contacto?'),
+      ]);
+    }
     const kept = { flow: data.flow, stage: 'company' };
     return stay(kept, [text('De acuerdo, lo repetimos. ¿A nombre de qué empresa o entidad lo preparo?')]);
   }
+
+  const wedding = handleBodaStages(data, raw, norm, buttonId, business, zone);
+  if (wedding) return wedding;
 
   if (data.stage === 'company') {
     const prompt = '¿A nombre de qué empresa o entidad lo preparo?';
@@ -564,8 +955,13 @@ function handle(ctx) {
   if (data.stage === 'needs') {
     const prompt =
       '¿Qué necesitáis? Comidas, habitaciones para los asistentes, audiovisual, o lo que queráis anotar.';
-    if (looksLikeQuestion(raw) && conocimiento.answerSideQuestion(norm) && raw.trim().length < 80 && !/,| y /.test(norm)) {
-      return stay(data, [text(`${conocimiento.answerSideQuestion(norm)}\n\n${prompt}`)]);
+    if (
+      looksLikeQuestion(raw) &&
+      conocimiento.answerSideQuestion(norm, data.flow) &&
+      raw.trim().length < 80 &&
+      !/,| y /.test(norm)
+    ) {
+      return stay(data, [text(`${conocimiento.answerSideQuestion(norm, data.flow)}\n\n${prompt}`)]);
     }
     const needs = parseNeeds(raw);
     if (needs.raw.length < 2) return stay(data, [text(prompt)]);
@@ -672,8 +1068,7 @@ function handle(ctx) {
       phoneContact: reach.phone,
       stage: 'review',
     };
-    const body = next.flow === 'congreso' ? reviewCongreso(next, business) : reviewEmpresa(next, business);
-    return stay(next, [buttons(body, REVIEW_BUTTONS)]);
+    return stay(next, [buttons(reviewFor(next, business), REVIEW_BUTTONS)]);
   }
 
   if (data.stage === 'review') {
@@ -682,18 +1077,16 @@ function handle(ctx) {
       ['si', 'sí', 'vale', 'ok', 'enviar', 'envialo', 'enviarlo', 'de acuerdo', 'adelante'].includes(norm) ||
       norm.startsWith('enviar');
     if (send) {
-      const replies = [text(data.flow === 'congreso' ? thanksCongreso(data, business) : thanksEmpresa(data, business))];
       return {
         data,
         clear: true,
-        replies,
+        replies: [text(thanksFor(data, business))],
         reservation: reservationFor(data, from),
       };
     }
-    const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm) : null;
+    const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
     if (side) {
-      const body = data.flow === 'congreso' ? reviewCongreso(data, business) : reviewEmpresa(data, business);
-      return stay(data, [text(side), buttons(body, REVIEW_BUTTONS)]);
+      return stay(data, [text(side), buttons(reviewFor(data, business), REVIEW_BUTTONS)]);
     }
     return stay(data, [text('Pulsa *Enviar solicitud* si está bien, o *Corregir datos* para repetirlos.')]);
   }
@@ -703,6 +1096,16 @@ function handle(ctx) {
 
 function stagePrompt(data) {
   switch (data.stage) {
+    case 'couple':
+      return '¿Cómo se llaman los novios, o el nombre de contacto?';
+    case 'wdate':
+      return '¿Qué fecha tenéis, aunque sea aproximada? Por ejemplo, 12/06/2027, junio de 2027 o verano de 2027.';
+    case 'guests':
+      return '¿Cuántos invitados, aproximadamente?';
+    case 'ceremony':
+      return '¿La ceremonia sería en el jardín de la hostería?';
+    case 'wneeds':
+      return '¿Qué más necesitáis? Habitaciones, música, autobús… o escribe nada.';
     case 'company':
       return '¿A nombre de qué empresa o entidad lo preparo?';
     case 'contact':
@@ -745,13 +1148,7 @@ function faqDuringFlow(data, raw, norm, business) {
     inFlow: true,
   });
   if (data.stage === 'hub') {
-    return stay(data, [
-      text(body),
-      buttons('¿Seguimos con las comidas de Navidad o con un congreso?', [
-        { id: 'emp_menus', title: 'Comidas Navidad' },
-        { id: 'cong_start', title: 'Evento o congreso' },
-      ]),
-    ]);
+    return stay(data, [text(body), buttons(HUB_FOLLOWUP, HUB_BUTTONS)]);
   }
   if (data.stage === 'browse') {
     return stay(data, [
@@ -768,9 +1165,11 @@ function faqDuringFlow(data, raw, norm, business) {
       ]),
     ]);
   }
+  if (data.stage === 'ceremony') {
+    return stay(data, [text(body), buttons('¿La ceremonia sería en el jardín de la hostería?', CEREMONY_BUTTONS)]);
+  }
   if (data.stage === 'review') {
-    const summary = data.flow === 'congreso' ? reviewCongreso(data, business) : reviewEmpresa(data, business);
-    return stay(data, [text(body), buttons(summary, REVIEW_BUTTONS)]);
+    return stay(data, [text(body), buttons(reviewFor(data, business), REVIEW_BUTTONS)]);
   }
   return stay(data, [text(`${body}\n\n${stagePrompt(data)}`)]);
 }

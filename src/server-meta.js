@@ -61,9 +61,14 @@ function waLink(phone) {
 function typeLabel(type) {
   if (type === 'evento_empresa') return '🎄 Empresa';
   if (type === 'evento_congreso') return '🏛️ Congreso';
+  if (type === 'evento_boda') return '💍 Boda';
   if (type === 'hotel') return '🛏️ Hotel';
   if (type === 'otivm') return 'OTIVM (histórico)';
   return '🍽️ Restaurante';
+}
+
+function alertFailed(row) {
+  return row.admin_alert === 'failed' || /Aviso admin: no enviado/.test(row.details || '');
 }
 
 function renderAdminPage({ businessName, confirmed, pending }) {
@@ -77,18 +82,31 @@ function renderAdminPage({ businessName, confirmed, pending }) {
     .join('');
 
   const pendingRows = pending
-    .map(
-      (r) =>
-        `<tr><td>#${esc(r.id)}</td><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${typeLabel(r.type)}</td>` +
+    .map((r) => {
+      const failed = alertFailed(r);
+      const status = failed
+        ? 'Pendiente de presupuesto · aviso no enviado'
+        : 'Pendiente de presupuesto';
+      return (
+        `<tr class="${failed ? 'alert-failed' : ''}"><td>#${esc(r.id)}</td><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${typeLabel(r.type)}</td>` +
         `<td>${esc(r.name)}</td><td>${esc(r.party_size || '-')}</td><td>${esc(r.details || '')}</td>` +
-        `<td>${waLink(r.phone)}</td><td>Pendiente de presupuesto</td></tr>`
-    )
+        `<td>${waLink(r.phone)}</td><td>${status}</td></tr>`
+      );
+    })
     .join('');
 
   const confirmedLabel =
     confirmed.length === 1 ? '1 reserva confirmada' : `${confirmed.length} reservas confirmadas`;
   const pendingLabel =
     pending.length === 1 ? '1 solicitud sin confirmar' : `${pending.length} solicitudes sin confirmar`;
+  const failedCount = pending.filter(alertFailed).length;
+  const failedNote = failedCount
+    ? `<p class="alert-banner"><strong>Aviso no enviado:</strong> ${
+        failedCount === 1
+          ? '1 solicitud no llegó a administración por WhatsApp.'
+          : `${failedCount} solicitudes no llegaron a administración por WhatsApp.`
+      } Siguen guardadas en esta lista.</p>`
+    : '';
 
   return `<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -100,8 +118,11 @@ function renderAdminPage({ businessName, confirmed, pending }) {
   th,td{padding:10px 12px;border-bottom:1px solid #e5e2d9;text-align:left;font-size:14px;vertical-align:top}
   th{background:#4a5233;color:#fff}
   tr:hover{background:#f0eee6}
+  tr.alert-failed{background:#fff1f0}
+  tr.alert-failed td{color:#7a1f1f}
   td.details{word-break:break-word;max-width:420px}
   a{color:#4a5233}
+  .alert-banner{background:#fff1f0;border:1px solid #e7b2b2;padding:10px 12px;border-radius:6px}
 </style></head>
 <body>
   <h1>Reservas próximos 30 días · ${esc(businessName)}</h1>
@@ -110,8 +131,9 @@ function renderAdminPage({ businessName, confirmed, pending }) {
     <tr><th>Nº</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Nombre</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th></tr>
     ${confirmedRows || '<tr><td colspan="8">Sin reservas próximas</td></tr>'}
   </table>
-  <h2>Solicitudes de empresa y congresos · pendientes de presupuesto</h2>
+  <h2>Solicitudes de boda, empresa y congresos · pendientes de presupuesto</h2>
   <p>${pendingLabel}, también fuera de los 30 días.</p>
+  ${failedNote}
   <table>
     <tr><th>Nº</th><th>Fecha</th><th>Servicio</th><th>Tipo</th><th>Contacto</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th><th>Estado</th></tr>
     ${pendingRows || '<tr><td colspan="9">Sin solicitudes pendientes</td></tr>'}

@@ -75,8 +75,16 @@ async function markRead(messageId) {
   });
 }
 
-// Plantilla de la Cloud API. La cabecera IMAGE y los payloads de botones
-// solo se incluyen si se piden: el texto del body vive en la plantilla de Meta.
+// Los parámetros de plantilla no admiten saltos de línea, tabuladores
+// ni más de cuatro espacios seguidos.
+function sanitizeTemplateText(value) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Plantilla de la Cloud API. La cabecera IMAGE, el body y los payloads de botones
+// solo se incluyen si se piden: el texto fijo vive en la plantilla de Meta.
 function buildTemplatePayload(to, options = {}) {
   if (!to) throw new Error('falta el teléfono de destino');
   if (!options.name) throw new Error('falta el nombre de la plantilla');
@@ -92,6 +100,17 @@ function buildTemplatePayload(to, options = {}) {
     components.push({
       type: 'header',
       parameters: [{ type: 'image', image: { link: String(options.headerImageUrl) } }],
+    });
+  }
+
+  if (Array.isArray(options.bodyParameters) && options.bodyParameters.length) {
+    components.push({
+      type: 'body',
+      parameters: options.bodyParameters.map((value) => {
+        const text = sanitizeTemplateText(value);
+        if (!text) throw new Error('parámetro de plantilla vacío');
+        return { type: 'text', text };
+      }),
     });
   }
 
@@ -124,4 +143,12 @@ async function sendTemplate(to, options) {
   return send(buildTemplatePayload(to, options), 'template');
 }
 
-module.exports = { sendText, sendButtons, sendList, markRead, buildTemplatePayload, sendTemplate };
+module.exports = {
+  sendText,
+  sendButtons,
+  sendList,
+  markRead,
+  buildTemplatePayload,
+  sendTemplate,
+  sanitizeTemplateText,
+};

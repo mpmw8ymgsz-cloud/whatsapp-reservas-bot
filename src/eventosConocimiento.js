@@ -30,6 +30,44 @@ function placeholdersText() {
   return PLACEHOLDERS.map((p) => `• ${p.label}: [PENDIENTE] ${p.note}`).join('\n');
 }
 
+function bodaIntro(businessName) {
+  return (
+    `💍 *Bodas en ${businessName}*\n\n` +
+    `La hostería puede reservarse en exclusiva para una boda o un evento. ` +
+    `Hay jardines y terraza acristalada, y la ceremonia puede celebrarse en el jardín. ` +
+    `El restaurante está recomendado en la Guía Michelin y tiene 1 Sol Repsol. ` +
+    `Contamos con ${HABITACIONES} para los invitados, y el menú se prepara a medida.\n\n` +
+    `Los espacios, juntos, admiten ${CAPACIDAD_TOTAL}.\n\n` +
+    `El traslado o el autobús de los invitados se consulta caso por caso, según el grupo y la fecha.\n\n` +
+    `Tomo los datos y el equipo envía el presupuesto. La fecha no queda reservada hasta entonces.`
+  );
+}
+
+function bodaSideAnswer(norm) {
+  if (
+    /vino|bebida|barra libre|cava|copas?|precio|cuanto cuesta|tarifa|\biva\b|plato|menu|carta|incluye|cuesta/.test(
+      norm
+    )
+  ) {
+    return (
+      'El menú de la boda es a medida. Los platos, la bebida y el precio los propone el equipo en el presupuesto; por aquí no cierro una tarifa.'
+    );
+  }
+  if (/jardin|ceremonia/.test(norm)) {
+    return 'La ceremonia puede celebrarse en el jardín. El uso de los jardines y de la terraza acristalada se concreta en el presupuesto.';
+  }
+  if (/michelin|repsol/.test(norm)) {
+    return 'El restaurante está recomendado en la Guía Michelin y tiene 1 Sol Repsol.';
+  }
+  if (/exclusiv/.test(norm)) {
+    return 'La hostería puede reservarse en exclusiva para la boda o el evento.';
+  }
+  if (/dj\b|musica|orquesta|violin/.test(norm)) {
+    return 'La música se anota en la solicitud. El equipo confirma en el presupuesto si entra y cómo se cobra.';
+  }
+  return null;
+}
+
 function congresoIntro(businessName) {
   return (
     `🏛️ *Eventos y congresos*\n\n` +
@@ -43,7 +81,11 @@ function congresoIntro(businessName) {
   );
 }
 
-function answerSideQuestion(norm) {
+function answerSideQuestion(norm, flow) {
+  if (flow === 'boda') {
+    const wedding = bodaSideAnswer(norm);
+    if (wedding) return wedding;
+  }
   if (/vino|bebida|barra libre|cava|copas?/.test(norm)) {
     return (
       'La bebida y la barra libre se detallan en el presupuesto. ' +
@@ -89,8 +131,28 @@ function answerSideQuestion(norm) {
   return null;
 }
 
+function isBodaTopic(norm) {
+  if (!norm) return false;
+  if (/\bbodas?\b/.test(norm)) return true;
+  if (/\benlace\b/.test(norm)) return true;
+  if (/\bcasamiento\b|\bcasamos\b|\bcasar(me|te|se|nos|os)?\b/.test(norm)) return true;
+  return false;
+}
+
+// Evento de empresa que no es una comida de Navidad: va al presupuesto de congreso/evento.
+function isCorporateEvent(norm) {
+  if (!norm) return false;
+  if (/navidad|nochebuena|nochevieja/.test(norm)) return false;
+  return /\beventos?\s+(de|para)\s+(la\s+|una\s+)?empresas?\b|\beventos?\s+corporativ|\beventos?\s+empresarial\b|\bjornadas?\s+de\s+empresas?\b/.test(
+    norm
+  );
+}
+
 function isCongresoTopic(norm) {
-  return /congresos?|convenciones?|convencion|seminarios?|conferencias?|macroeventos?|eventos? grandes?|gran evento/.test(norm);
+  if (/congresos?|convenciones?|convencion|seminarios?|conferencias?|macroeventos?|eventos? grandes?|gran evento/.test(norm)) {
+    return true;
+  }
+  return isCorporateEvent(norm);
 }
 
 function isHubTopic(norm) {
@@ -118,8 +180,11 @@ module.exports = {
   MAX_AFORO,
   PLACEHOLDERS,
   placeholdersText,
+  bodaIntro,
   congresoIntro,
   answerSideQuestion,
+  isBodaTopic,
+  isCorporateEvent,
   isCongresoTopic,
   isHubTopic,
   isOtivmQuery,
