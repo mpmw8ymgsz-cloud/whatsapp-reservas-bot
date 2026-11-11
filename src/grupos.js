@@ -3,6 +3,7 @@ const { parseDate, normalize } = require('./dateParser');
 const menus = require('./menusEmpresa');
 const conocimiento = require('./eventosConocimiento');
 const faq = require('./faqLlegada');
+const fotos = require('./fotos');
 
 const MONTHS = {
   enero: 1,
@@ -60,22 +61,23 @@ function startOverview(business) {
   };
 }
 
-function startCongreso(business) {
+function startCongreso(business, options = {}) {
+  const replies = [text(conocimiento.congresoIntro(business.name))];
+  if (options.withPhotos !== false) replies.push(...fotos.presentationReplies('congreso'));
+  replies.push(text('¿A nombre de qué empresa o entidad lo preparo?'));
   return {
     data: base('congreso', 'company'),
-    replies: [text(`${conocimiento.congresoIntro(business.name)}\n\n¿A nombre de qué empresa o entidad lo preparo?`)],
+    replies,
   };
 }
 
-function startBoda(business) {
+function startBoda(business, options = {}) {
+  const replies = [text(conocimiento.bodaIntro(business.name))];
+  if (options.withPhotos !== false) replies.push(...fotos.presentationReplies('boda'));
+  replies.push(text('¿Cómo se llaman los novios, o el nombre de contacto?'));
   return {
     data: base('boda', 'couple'),
-    replies: [
-      text(
-        `${conocimiento.bodaIntro(business.name)}\n\n` +
-          '¿Cómo se llaman los novios, o el nombre de contacto?'
-      ),
-    ],
+    replies,
   };
 }
 
@@ -110,11 +112,11 @@ function startHub(business) {
   };
 }
 
-function startIntent(intent, business) {
+function startIntent(intent, business, options) {
   if (!intent) return startHub(business);
-  if (intent.kind === 'boda') return startBoda(business);
+  if (intent.kind === 'boda') return startBoda(business, options);
   if (intent.kind === 'empresa_overview' || intent.kind === 'empresa_detail') return startOverview(business);
-  if (intent.kind === 'congreso') return startCongreso(business);
+  if (intent.kind === 'congreso') return startCongreso(business, options);
   return startHub(business);
 }
 
@@ -243,6 +245,7 @@ function empresaDetails(data, from) {
     `WhatsApp: ${from}`,
     `Espacio: ${conocimiento.spaceHint(data.partySize)}`,
     trasladoNota(data),
+    fotos.clientPhotoNote(data),
     'Estado: pendiente de presupuesto',
   ];
   return parts.filter(Boolean).join(' | ');
@@ -265,6 +268,7 @@ function congresoDetails(data, from) {
     `WhatsApp: ${from}`,
     'Pendiente casa: nombre y aforo de cada salón; equipamiento audiovisual',
     trasladoNota(data),
+    fotos.clientPhotoNote(data),
     'Estado: pendiente de presupuesto',
   ];
   return parts.filter(Boolean).join(' | ');
@@ -344,24 +348,24 @@ function thanksCongreso(data, business) {
 }
 
 function adminEmpresa(data, from) {
-  return (
+  const body =
     `🎄 SOLICITUD EMPRESA pendiente de presupuesto #{{id}}\n` +
     `Empresa: ${data.company}\nContacto: ${data.contactName}\n` +
     `${data.dateLabel} · ${data.service} · ${data.partySize} personas\n` +
     `Menú: ${menus.OFFER_NAME} (menú a medida, ${menus.PRICE_SHORT})\n` +
-    `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`
-  );
+    `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`;
+  return appendPhotoNote(body, data);
 }
 
 function adminCongreso(data, from) {
   const fechas = data.dateEndLabel ? `${data.dateLabel} → ${data.dateEndLabel}` : data.dateLabel;
-  return (
+  const body =
     `🏛️ SOLICITUD CONGRESO pendiente de presupuesto #{{id}}\n` +
     `Empresa: ${data.company}\nContacto: ${data.contactName}\nTipo: ${data.eventType}\n` +
     `${fechas} · ${data.partySize} asistentes\n` +
     `Necesidades: ${data.needsRaw}\n` +
-    `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`
-  );
+    `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`;
+  return appendPhotoNote(body, data);
 }
 
 function bodaDetails(data, from) {
@@ -375,6 +379,7 @@ function bodaDetails(data, from) {
     `Tel: ${data.phoneContact}`,
     `WhatsApp: ${from}`,
     trasladoNota(data),
+    fotos.clientPhotoNote(data),
     'Estado: pendiente de presupuesto',
   ];
   return parts.filter(Boolean).join(' | ');
@@ -408,14 +413,19 @@ function thanksBoda(data, business) {
 }
 
 function adminBoda(data, from) {
-  return (
+  const body =
     `💍 SOLICITUD BODA pendiente de presupuesto #{{id}}\n` +
     `Contacto: ${data.contactName}\n` +
     `${data.dateLabel} · ${data.partySize} invitados\n` +
     `Ceremonia en la finca: ${data.ceremony}\n` +
     `Necesidades: ${data.needsRaw}\n` +
-    `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`
-  );
+    `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`;
+  return appendPhotoNote(body, data);
+}
+
+function appendPhotoNote(body, data) {
+  const note = fotos.clientPhotoNote(data);
+  return note ? `${body}\n${note}` : body;
 }
 
 function alertLine(kind, data) {
@@ -701,6 +711,10 @@ function acceptableWhen(parsed, zone) {
   if (start < now || start > limit) return false;
   if (end && end > limit) return false;
   return true;
+}
+
+function isCeremonyReply(textValue, buttonId) {
+  return parseCeremony(textValue, buttonId) != null;
 }
 
 function parseCeremony(textValue, buttonId) {
@@ -1190,8 +1204,10 @@ module.exports = {
   isOtivmQuery: conocimiento.isOtivmQuery,
   startHub,
   startIntent,
-  startOverview,
+  startBoda,
   startCongreso,
+  startOverview,
+  isCeremonyReply,
   handle,
   stampId,
   parseRange,

@@ -31,6 +31,8 @@ module.exports = {
       clean(process.env.HEADER_IMAGE_URL) ||
       DEFAULT_MARKETING_HEADER_IMAGE_URL,
   },
+  // URL pública de este servicio. WhatsApp descarga las fotos de /fotos desde aquí.
+  publicBaseUrl: clean(process.env.PUBLIC_BASE_URL) || 'https://whatsapp-reservas-bot.onrender.com',
   tursoUrl: clean(process.env.TURSO_DATABASE_URL),
   tursoAuthToken: clean(process.env.TURSO_AUTH_TOKEN),
 

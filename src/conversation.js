@@ -7,6 +7,7 @@ const hotelApi = require('./hotelApi');
 const grupos = require('./grupos');
 const faq = require('./faqLlegada');
 const marketing = require('./marketing');
+const fotos = require('./fotos');
 
 const B = config.business;
 
@@ -51,9 +52,10 @@ function isPendingEvent(type) {
   return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda';
 }
 
-async function handleIncoming(from, text, buttonId) {
+async function handleIncoming(from, text, buttonId, rawMessage) {
   const normText = normalize(text);
   const routedButton = marketing.routeButtonId(buttonId);
+  const incomingImage = !!(rawMessage && rawMessage.type === 'image');
 
   // Comandos de administrador (solo desde el número del negocio)
   if (config.adminPhone && from === config.adminPhone) {
@@ -78,6 +80,29 @@ async function handleIncoming(from, text, buttonId) {
   }
   if (buttonId === 'my_reservations' || normText.includes('mis reserva') || normText === 'cancelar reserva') {
     return showMyReservations(from);
+  }
+
+  if (incomingImage) {
+    await rememberClientPhoto(from, session, rawMessage);
+    if (!normText) {
+      await wa.sendText(from, imageAck(session));
+      if (!session.step || session.step === STEP.IDLE) return showMenu(from);
+      return;
+    }
+  }
+
+  if (routedButton === 'ver_fotos') {
+    return sendPhotoTour(from, 'fotos', session);
+  }
+
+  const askingPhotos = !buttonId && fotos.matchPhotoRequest(normText);
+  const ceremonyReply =
+    session.step === STEP.GRUPO &&
+    session.data &&
+    session.data.stage === 'ceremony' &&
+    grupos.isCeremonyReply(text, routedButton);
+  if (askingPhotos && !ceremonyReply) {
+    return sendPhotoTour(from, normText, session);
   }
 
   if (session.step === STEP.GRUPO || grupos.isGrupoButton(routedButton)) {
@@ -180,7 +205,7 @@ async function showMenu(from) {
   await db.clearSession(from);
   await wa.sendButtons(
     from,
-    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "mis reservas", "info", "boda", "comidas de Navidad" o "congreso"._`,
+    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "ver fotos", "mis reservas", "info", "boda", "comidas de Navidad" o "congreso"._`,
     [
       { id: 'exp_rest', title: '🍽️ Restaurante' },
       { id: 'exp_hotel', title: '🛏️ Hotel' },
@@ -198,7 +223,7 @@ async function sendInfo(from) {
       `🛏️ *Hotel*: reserva online en ${B.hotelBookingUrl} o escríbeme aquí y aviso a recepción.\n\n` +
       `🎉 *Eventos*: bodas en exclusiva, congresos y grupos grandes (capacidad total de 500 a 700; terraza acristalada de 10 a 50). ` +
       `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. Escribe *boda*, *eventos* o *congreso*.\n\n` +
-      `Escribe *menu* para volver al inicio.`
+      `Escribe *ver fotos* para ver la casa, o *menu* para volver al inicio.`
   );
 }
 
@@ -345,8 +370,10 @@ async function handleHotelQuote(from, buttonId, session, text) {
     const conf = await hotelApi.confirmReservation(d.pmsId);
     await db.clearSession(from);
 
+    const photoNote = fotos.clientPhotoNote(d);
     const detalles = `Entrada ${d.entrada}, Salida ${d.salida}, ${d.noches} noche(s), ${d.pax} pers. | Hab ${d.habitacion} | ${d.precioTotal} EUR | PMS ${d.pmsId}` +
-      (conf.ok ? '' : ' | AVISO: no se pudo pasar a confirmada');
+      (conf.ok ? '' : ' | AVISO: no se pudo pasar a confirmada') +
+      (photoNote ? ` | ${photoNote}` : '');
     const localId = await db.createReservation({
       phone: from,
       name: d.name,
@@ -371,7 +398,8 @@ async function handleHotelQuote(from, buttonId, session, text) {
         `🛏️ RESERVA HOTEL CONFIRMADA (bot) #${localId}\n` +
           `Hab: ${d.habitacion}\nEntrada: ${d.entrada}\nSalida: ${d.salida}\n${d.noches} noche(s) · ${d.pax} pers.\n` +
           `Cliente: ${d.name}\nTel: ${from}\n💶 ${d.precioTotal.toFixed(2)}€ (paga a la llegada)\n\n` +
-          (conf.ok ? `✅ Confirmada en el PMS (${d.pmsId})` : `⚠️ En el PMS sigue como PENDIENTE (${d.pmsId}) - revisar`)
+          (conf.ok ? `✅ Confirmada en el PMS (${d.pmsId})` : `⚠️ En el PMS sigue como PENDIENTE (${d.pmsId}) - revisar`) +
+          (photoNote ? `\n${photoNote}` : '')
       );
     }
     return;
@@ -518,6 +546,7 @@ async function handleConfirmStep(from, buttonId, session, text) {
     const d = session.data;
     if (d.type === 'otivm') return otivmCerrado(from);
 
+    const photoNote = fotos.clientPhotoNote(d);
     const id = await db.createReservation({
       phone: from,
       name: d.name,
@@ -525,6 +554,7 @@ async function handleConfirmStep(from, buttonId, session, text) {
       date: d.date,
       time: d.time,
       type: d.type,
+      details: photoNote || undefined,
     });
     await db.clearSession(from);
 
@@ -538,7 +568,8 @@ async function handleConfirmStep(from, buttonId, session, text) {
       const tipo = '🍽️ RESTAURANTE';
       await wa.sendText(
         config.adminPhone,
-        `${tipo} — reserva #${id}\n${d.dateLabel} ${d.time}\n${d.partySize} personas\nNombre: ${d.name}\nTel: ${from}`
+        `${tipo} — reserva #${id}\n${d.dateLabel} ${d.time}\n${d.partySize} personas\nNombre: ${d.name}\nTel: ${from}` +
+          (photoNote ? `\n${photoNote}` : '')
       );
     }
     return;
@@ -730,8 +761,76 @@ async function notifyAdminOfBudget(id, reservation) {
   }
 }
 
+async function rememberClientPhoto(from, session, rawMessage) {
+  if (!session || !session.step || session.step === STEP.IDLE) return;
+  const data = { ...(session.data || {}) };
+  data.fotosCliente = (Number(data.fotosCliente) || 0) + 1;
+  const caption = rawMessage && rawMessage.image && rawMessage.image.caption;
+  if (caption && !data.fotoCaption) {
+    data.fotoCaption = String(caption).replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+  session.data = data;
+  await db.setSession(from, session.step, data);
+}
+
+function imageAck(session) {
+  if (session.step === STEP.GRUPO) {
+    return (
+      'Gracias por la foto. La dejo anotada en la solicitud. ' +
+      'Si puedes, cuéntame por texto qué es y seguimos con lo que estábamos apuntando.'
+    );
+  }
+  if (session.step && session.step !== STEP.IDLE) {
+    return 'Gracias por la foto. Por aquí te leo en texto: cuéntame qué es y seguimos con lo que estábamos apuntando.';
+  }
+  return 'Gracias por la foto. Cuéntame por texto qué necesitas (una mesa, el hotel, una boda o un evento) y te ayudo.';
+}
+
+async function sendImageSafe(from, photo) {
+  const label = photo.file || photo.link || photo.id || 'imagen';
+  try {
+    if (typeof wa.sendImage !== 'function') throw new Error('este proveedor no envía imágenes');
+    const payload = { caption: photo.caption || photo.body || '' };
+    if (photo.id) payload.id = photo.id;
+    else payload.link = photo.link || fotos.publicUrl(photo.file);
+    await wa.sendImage(from, payload);
+  } catch (err) {
+    console.error(`[fotos] no se pudo enviar ${label}: ${formatSendError(err)}`);
+  }
+}
+
+async function deliverPhotos(from, photos) {
+  for (const photo of photos) await sendImageSafe(from, photo);
+}
+
+async function sendPhotoTour(from, norm, session) {
+  const category = fotos.matchPhotoRequest(norm) || fotos.categoryFor(norm);
+  await deliverPhotos(from, fotos.album(category));
+  if (session.step && session.step !== STEP.IDLE) {
+    await wa.sendText(from, 'Cuando quieras seguimos con lo que estábamos apuntando.');
+    return;
+  }
+  const intent = grupos.classifyIncoming(norm);
+  if (intent && intent.kind === 'boda') {
+    return dispatchGrupo(from, grupos.startBoda(B, { withPhotos: false }));
+  }
+  if (intent && intent.kind === 'congreso') {
+    return dispatchGrupo(from, grupos.startCongreso(B, { withPhotos: false }));
+  }
+  if (intent && (intent.kind === 'empresa_overview' || intent.kind === 'hub')) {
+    return dispatchGrupo(from, grupos.startIntent(intent, B));
+  }
+  if (/habitacion|dormir|alojamiento|\bhotel\b/.test(norm)) return startHotel(from);
+  if (/reserv|\bmesa\b|comer|cenar|restaurante/.test(norm)) return startRestaurant(from);
+  return showMenu(from);
+}
+
 async function sendReplies(from, replies) {
   for (const r of replies) {
+    if (r.kind === 'image') {
+      await sendImageSafe(from, r);
+      continue;
+    }
     if (r.kind === 'buttons') await wa.sendButtons(from, r.body, r.buttons);
     else await wa.sendText(from, r.body);
   }

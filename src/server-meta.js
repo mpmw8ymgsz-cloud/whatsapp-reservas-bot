@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const path = require('path');
 const express = require('express');
 const config = require('./config');
 const wa = require('./whatsapp');
@@ -6,6 +7,7 @@ const marketing = require('./marketing');
 const { privacyHtml } = require('./privacyPage');
 
 function extractText(message) {
+  if (message.type === 'image') return (message.image && message.image.caption) || '';
   if (message.type === 'text') return message.text.body;
   // Respuesta a un botón de plantilla (quick reply): type "button", no "interactive".
   if (message.type === 'button' && message.button) {
@@ -144,6 +146,13 @@ function renderAdminPage({ businessName, confirmed, pending }) {
 function createApp(onMessage, deps = {}) {
   const app = express();
   app.use(express.json());
+  app.use(
+    '/fotos',
+    express.static(path.join(__dirname, '..', 'public', 'fotos'), {
+      index: false,
+      maxAge: '7d',
+    })
+  );
   const sendTemplate = deps.sendTemplate || ((to, options) => wa.sendTemplate(to, options));
   const isMarketingOptOut =
     deps.isMarketingOptOut || ((phone) => require('./db').isMarketingOptOut(phone));
@@ -180,7 +189,7 @@ function createApp(onMessage, deps = {}) {
       const from = message.from;
       console.log(`[webhook] Mensaje de ${from}, tipo ${message.type}`);
       wa.markRead(message.id).catch((err) => console.error('Error marcando como leído:', err.message));
-      await onMessage(from, extractText(message), extractButtonId(message));
+      await onMessage(from, extractText(message), extractButtonId(message), message);
       console.log(`[webhook] Procesado y respondido a ${from}`);
     } catch (err) {
       console.error('Error procesando webhook:', err?.response?.data || err);

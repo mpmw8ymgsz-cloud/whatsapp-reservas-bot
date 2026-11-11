@@ -31,6 +31,30 @@ async function sendText(to, body) {
   }, 'text');
 }
 
+// Imagen de la Cloud API. image es { link } o { id }, con caption opcional.
+function buildImagePayload(to, image = {}) {
+  if (!to) throw new Error('falta el teléfono de destino');
+  const id = image.id != null && String(image.id).trim() ? String(image.id).trim() : '';
+  const link = image.link != null && String(image.link).trim() ? String(image.link).trim() : '';
+  if (!id && !link) throw new Error('falta link o id de la imagen');
+
+  const imagePayload = id ? { id } : { link };
+  if (image.caption != null && String(image.caption).trim()) {
+    imagePayload.caption = String(image.caption).trim().slice(0, 1024);
+  }
+
+  return {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'image',
+    image: imagePayload,
+  };
+}
+
+async function sendImage(to, image) {
+  return send(buildImagePayload(to, image), 'image');
+}
+
 // buttons: [{ id, title }] - máximo 3 botones, título máx. 20 caracteres
 async function sendButtons(to, bodyText, buttons) {
   await send({
@@ -145,9 +169,11 @@ async function sendTemplate(to, options) {
 
 module.exports = {
   sendText,
+  sendImage,
   sendButtons,
   sendList,
   markRead,
+  buildImagePayload,
   buildTemplatePayload,
   sendTemplate,
   sanitizeTemplateText,
