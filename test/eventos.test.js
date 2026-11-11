@@ -17,6 +17,7 @@ const reservations = [];
 const optouts = new Map();
 let failAdminText = false;
 let failAdminTemplate = false;
+let failImages = false;
 
 function metaSendError(message, code) {
   const err = new Error(message);
@@ -94,6 +95,16 @@ const mockWa = {
     if (failAdminTemplate) throw metaSendError('template not found', 132001);
     sent.push({ to, kind: 'template', body: options.bodyParameters.join(' '), options });
   },
+  async sendImage(to, image) {
+    if (failImages) throw metaSendError('Media download error', 131053);
+    sent.push({
+      to,
+      kind: 'image',
+      body: image.caption || '',
+      link: image.link || '',
+      id: image.id || '',
+    });
+  },
 };
 
 const Module = require('module');
@@ -129,9 +140,9 @@ function assertWhatsApp(messages) {
   }
 }
 
-async function say(phone, text, buttonId = null) {
+async function say(phone, text, buttonId = null, rawMessage = null) {
   const before = sent.length;
-  await handleIncoming(phone, text, buttonId);
+  await handleIncoming(phone, text, buttonId, rawMessage);
   const messages = sent.slice(before).filter((m) => m.to === phone);
   assertWhatsApp(messages);
   return messages;
@@ -144,6 +155,7 @@ beforeEach(() => {
   optouts.clear();
   failAdminText = false;
   failAdminTemplate = false;
+  failImages = false;
   Settings.now = () => new Date('2026-10-22T10:00:00+02:00').getTime();
 });
 
@@ -702,6 +714,156 @@ describe('cómo llegar y traslado', () => {
     assert.equal(reservations.at(-1).status, 'pending');
     assert.match(reservations.at(-1).details, /Traslado: interesado/);
     assert.match(reservations.at(-1).details, /menú a medida/);
+  });
+});
+
+describe('fotos de la hostería', () => {
+  function imagesOf(messages) {
+    return messages.filter((m) => m.kind === 'image');
+  }
+
+  it('el menú menciona ver fotos y mantiene los tres botones', async () => {
+    const messages = await say('34600000080', 'hola');
+    assert.match(joined(messages), /ver fotos/);
+    assert.equal(imagesOf(messages).length, 0);
+    assert.deepEqual(messages[0].buttons.map((b) => b.id), ['exp_rest', 'exp_hotel', 'exp_eventos']);
+  });
+
+  it('quien pide fotos recibe el álbum y después el menú', async () => {
+    const messages = await say('34600000081', 'ver fotos');
+    const images = imagesOf(messages);
+    assert.ok(images.length >= 2 && images.length <= 4);
+    for (const image of images) {
+      assert.match(image.body, /[A-Za-zÁÉÍÓÚáéíóúñÑ]/);
+      assert.match(image.link, /\/fotos\/.+\.jpg$/);
+      assert.ok(image.body.length <= 1024);
+    }
+    assert.equal(messages.at(-1).kind, 'buttons');
+    assert.deepEqual(messages.at(-1).buttons.map((b) => b.id), ['exp_rest', 'exp_hotel', 'exp_eventos']);
+    assert.equal(sessions.has('34600000081'), false);
+  });
+
+  it('fotos de bodas abre el presupuesto después de las fotos, sin repetir el álbum', async () => {
+    const messages = await say('34600000082', 'fotos de bodas');
+    const images = imagesOf(messages);
+    assert.ok(images.length >= 2 && images.length <= 4);
+    assert.match(images.map((m) => m.body).join('\n'), /jardín/i);
+    assert.match(joined(messages), /Bodas en/);
+    assert.match(joined(messages), /novios/);
+    assert.equal(sessions.get('34600000082').data.flow, 'boda');
+    assert.equal(sessions.get('34600000082').data.stage, 'couple');
+    assert.equal(reservations.length, 0);
+  });
+
+  it('la presentación de boda manda una o dos fotos después del texto', async () => {
+    const messages = await say('34600000083', 'quiero una boda');
+    assert.equal(messages[0].kind, 'text');
+    assert.match(messages[0].body, /Bodas en/);
+    const images = imagesOf(messages);
+    assert.ok(images.length >= 1 && images.length <= 2);
+    assert.ok(messages.slice(1, 1 + images.length).every((m) => m.kind === 'image'));
+    assert.match(messages.at(-1).body, /novios/);
+    assert.equal(sessions.get('34600000083').data.flow, 'boda');
+  });
+
+  it('la presentación de congreso manda una o dos fotos y no la carta de Navidad', async () => {
+    const messages = await say('34600000084', 'queremos un congreso');
+    const images = imagesOf(messages);
+    assert.equal(messages[0].kind, 'text');
+    assert.match(messages[0].body, /500 a 700/);
+    assert.ok(images.length >= 1 && images.length <= 2);
+    assert.match(joined(messages), /empresa o entidad/);
+    assert.doesNotMatch(joined(messages), /Comidas de Navidad|desde 55 €/);
+    assert.equal(sessions.get('34600000084').data.flow, 'congreso');
+  });
+
+  it('restaurante, Navidad y mesa no se convierten en un álbum', async () => {
+    let messages = await say('34600000085', 'restaurante');
+    assert.equal(imagesOf(messages).length, 0);
+    assert.match(joined(messages), /Restaurante Don Fadrique/);
+    assert.match(joined(messages), /qué día/i);
+    assert.equal(sessions.get('34600000085').step, 'DATE');
+
+    messages = await say('34600000086', 'menús de Navidad');
+    assert.equal(imagesOf(messages).length, 0);
+    assert.match(joined(messages), /Comidas de Navidad para empresas/);
+    assert.match(joined(messages), /desde 55 € \+ IVA/);
+    assert.equal(sessions.get('34600000086').data.flow, 'empresa');
+
+    messages = await say('34600000087', 'quiero una mesa');
+    assert.equal(imagesOf(messages).length, 0);
+    assert.match(joined(messages), /qué día/i);
+  });
+
+  it('en el jardín, durante la boda, sigue siendo la respuesta de la ceremonia', async () => {
+    const phone = '34600000088';
+    await say(phone, 'quiero una boda');
+    await say(phone, 'Ana y Luis');
+    await say(phone, '12/06/2027');
+    await say(phone, '120');
+    const messages = await say(phone, 'en el jardin');
+    assert.equal(imagesOf(messages).length, 0);
+    assert.equal(sessions.get(phone).data.stage, 'wneeds');
+    assert.equal(sessions.get(phone).data.ceremony, 'sí');
+  });
+
+  it('pedir fotos a mitad de la boda no abandona la solicitud', async () => {
+    const phone = '34600000089';
+    await say(phone, 'quiero una boda');
+    await say(phone, 'Ana y Luis');
+    const messages = await say(phone, 'fotos del jardin');
+    assert.ok(imagesOf(messages).length >= 2);
+    assert.match(joined(messages), /seguimos/);
+    assert.equal(sessions.get(phone).data.flow, 'boda');
+    assert.equal(sessions.get(phone).data.stage, 'wdate');
+  });
+
+  it('si el envío de la imagen falla, el cliente sigue recibiendo el texto', async () => {
+    failImages = true;
+    const errors = [];
+    const original = console.error;
+    console.error = (...args) => errors.push(args.map(String).join(' '));
+    try {
+      const messages = await say('34600000090', 'enséñame');
+      assert.equal(imagesOf(messages).length, 0);
+      assert.equal(messages.at(-1).kind, 'buttons');
+      assert.match(joined(messages), /Hostería Don Fadrique/);
+      assert.ok(errors.some((line) => /\[fotos\]/.test(line)));
+    } finally {
+      console.error = original;
+    }
+  });
+
+  it('una foto sin texto se agradece y, si hay solicitud, se anota', async () => {
+    const idle = await say('34600000091', '', null, { type: 'image', image: { id: 'media-idle' } });
+    assert.match(joined(idle), /Gracias por la foto/);
+    assert.match(joined(idle), /texto/);
+    assert.ok(idle.some((m) => m.kind === 'buttons'));
+
+    const phone = '34600000092';
+    await say(phone, 'quiero una mesa');
+    const during = await say(phone, '', null, { type: 'image', image: { id: 'media-mesa' } });
+    assert.match(joined(during), /Gracias por la foto/);
+    assert.match(joined(during), /texto/);
+    assert.equal(sessions.get(phone).step, 'DATE');
+    assert.equal(during.some((m) => m.kind === 'buttons'), false);
+
+    const wedding = '34600000093';
+    await say(wedding, 'quiero una boda');
+    const noted = await say(wedding, '', null, { type: 'image', image: { id: 'media-boda' } });
+    assert.match(joined(noted), /solicitud/);
+    assert.equal(sessions.get(wedding).data.stage, 'couple');
+    assert.equal(sessions.get(wedding).data.fotosCliente, 1);
+    await say(wedding, 'Ana y Luis');
+    await say(wedding, '12/06/2027');
+    await say(wedding, '80');
+    await say(wedding, 'sí', 'boda_si');
+    await say(wedding, 'nada');
+    await say(wedding, 'ana@example.com');
+    await say(wedding, 'enviar', 'emp_send');
+    assert.match(reservations.at(-1).details, /El cliente envió 1 foto por WhatsApp/);
+    const admin = sent.filter((m) => m.to === '34699999999').at(-1);
+    assert.match(admin.body, /El cliente envió 1 foto por WhatsApp/);
   });
 });
 

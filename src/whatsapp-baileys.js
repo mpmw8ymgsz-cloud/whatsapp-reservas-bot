@@ -59,11 +59,13 @@ async function start(onMessage) {
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
       const from = fromJid(msg.key.remoteJid);
+      const imageMessage = msg.message.imageMessage;
       let text =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
         msg.message.buttonsResponseMessage?.selectedDisplayText ||
         msg.message.listResponseMessage?.title ||
+        imageMessage?.caption ||
         '';
       let buttonId = null;
 
@@ -83,13 +85,23 @@ async function start(onMessage) {
         console.error('Error marcando como leído (Baileys):', err.message);
       }
 
-      await onMessage(from, text, buttonId);
+      const rawMessage = imageMessage
+        ? { type: 'image', image: { caption: imageMessage.caption || '', id: msg.key.id } }
+        : null;
+      await onMessage(from, text, buttonId, rawMessage);
     }
   });
 }
 
 async function sendText(to, body) {
   await sock.sendMessage(toJid(to), { text: body });
+}
+
+async function sendImage(to, image = {}) {
+  if (!image.link) throw new Error('Baileys necesita el enlace de la imagen');
+  const content = { image: { url: String(image.link) } };
+  if (image.caption) content.caption = String(image.caption);
+  await sock.sendMessage(toJid(to), content);
 }
 
 async function sendButtons(to, bodyText, buttons) {
@@ -119,4 +131,4 @@ function getStatus() {
   return connectionStatus;
 }
 
-module.exports = { start, sendText, sendButtons, sendList, markRead, getQrDataUrl, getStatus };
+module.exports = { start, sendText, sendImage, sendButtons, sendList, markRead, getQrDataUrl, getStatus };
