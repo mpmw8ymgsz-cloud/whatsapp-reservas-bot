@@ -1,6 +1,8 @@
 // Comidas de Navidad para empresas: un solo menú a medida.
 // No hay carta cerrada ni precios por menú tipificado.
 
+const conocimiento = require('./eventosConocimiento');
+
 const OFFER_NAME = 'Comidas de Navidad para empresas';
 const PRICE_SHORT = 'desde 55 € + IVA por persona';
 
@@ -21,6 +23,9 @@ function overviewText(businessName) {
 }
 
 function isEmpresaTopic(norm) {
+  if (!norm) return false;
+  // «evento de empresa» (sin Navidad) es un evento corporativo, no la comida de diciembre.
+  if (conocimiento.isCorporateEvent(norm)) return false;
   if (/\bempresas?\b/.test(norm)) return true;
   if (/navidad|nochebuena|nochevieja/.test(norm)) return true;
   if (/gran gala|menu mediodia|menu del mediodia|menu a medida|a medida/.test(norm)) return true;

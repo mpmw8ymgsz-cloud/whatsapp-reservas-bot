@@ -46,6 +46,8 @@ async function execute(sql, args = []) {
   return result.response.result;
 }
 
+const PENDING_EVENT_TYPES = ['evento_empresa', 'evento_congreso', 'evento_boda'];
+
 const ready = (async () => {
   await execute(`CREATE TABLE IF NOT EXISTS reservations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +73,7 @@ const ready = (async () => {
   // Migraciones sobre tablas ya existentes (ignorar error si la columna ya existe)
   try { await execute(`ALTER TABLE reservations ADD COLUMN type TEXT DEFAULT 'restaurante'`); } catch (e) {}
   try { await execute(`ALTER TABLE reservations ADD COLUMN details TEXT`); } catch (e) {}
+  try { await execute(`ALTER TABLE reservations ADD COLUMN admin_alert TEXT`); } catch (e) {}
   await execute(`CREATE TABLE IF NOT EXISTS marketing_optouts (
     phone TEXT PRIMARY KEY,
     reason TEXT,
@@ -138,22 +141,25 @@ module.exports = {
   async getUpcomingReservations(phone) {
     await ready;
     const today = new Date().toISOString().slice(0, 10);
+    const typeSlots = PENDING_EVENT_TYPES.map(() => '?').join(', ');
     const result = await execute(
       `SELECT * FROM reservations
        WHERE phone = ? AND date >= ?
-         AND (status = 'confirmed' OR (status = 'pending' AND type IN ('evento_empresa', 'evento_congreso')))
+         AND (status = 'confirmed' OR (status = 'pending' AND type IN (${typeSlots})))
        ORDER BY date, time`,
-      [phone, today]
+      [phone, today, ...PENDING_EVENT_TYPES]
     );
     return rowsToObjects(result);
   },
 
   async getPendingEventRequests() {
     await ready;
+    const typeSlots = PENDING_EVENT_TYPES.map(() => '?').join(', ');
     const result = await execute(
       `SELECT * FROM reservations
-       WHERE status = 'pending' AND type IN ('evento_empresa', 'evento_congreso')
-       ORDER BY date, time, id`
+       WHERE status = 'pending' AND type IN (${typeSlots})
+       ORDER BY date, time, id`,
+      PENDING_EVENT_TYPES
     );
     return rowsToObjects(result);
   },
@@ -171,6 +177,21 @@ module.exports = {
       [id, phone]
     );
     return result.affected_row_count > 0;
+  },
+
+  async markAdminAlertFailed(id) {
+    await ready;
+    await execute(
+      `UPDATE reservations
+       SET admin_alert = 'failed',
+           details = CASE
+             WHEN details IS NULL OR TRIM(details) = '' THEN 'Aviso admin: no enviado'
+             WHEN INSTR(details, 'Aviso admin: no enviado') > 0 THEN details
+             ELSE details || ' | Aviso admin: no enviado'
+           END
+       WHERE id = ?`,
+      [id]
+    );
   },
 
   async upsertCustomerName(phone, name) {

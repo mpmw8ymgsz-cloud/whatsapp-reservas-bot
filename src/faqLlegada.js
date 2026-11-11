@@ -59,7 +59,7 @@ function transportReply({ inFlow }) {
   }
   return (
     `${base}\n\n` +
-    'Si quieres, escribe *comidas de Navidad* o *congreso* y tomo los datos. El equipo lo confirma en el presupuesto.'
+    'Si quieres, escribe *boda*, *comidas de Navidad* o *congreso* y tomo los datos. El equipo lo confirma en el presupuesto.'
   );
 }
 

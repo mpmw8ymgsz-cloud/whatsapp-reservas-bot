@@ -32,6 +32,7 @@ function expConfig() {
 function expLabel(type) {
   if (type === 'evento_empresa') return 'Empresa · pendiente';
   if (type === 'evento_congreso') return 'Congreso · pendiente';
+  if (type === 'evento_boda') return 'Boda · pendiente';
   if (type === 'hotel') return 'Hotel';
   if (type === 'otivm') return 'OTIVM (histórico)';
   return 'Restaurante Don Fadrique';
@@ -39,10 +40,15 @@ function expLabel(type) {
 
 function typeIcon(type) {
   if (type === 'evento_congreso') return '🏛️';
+  if (type === 'evento_boda') return '💍';
   if (type === 'evento_empresa') return '🎄';
   if (type === 'hotel') return '🛏️';
   if (type === 'otivm') return '🌿';
   return '🍽️';
+}
+
+function isPendingEvent(type) {
+  return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda';
 }
 
 async function handleIncoming(from, text, buttonId) {
@@ -91,7 +97,8 @@ async function handleIncoming(from, text, buttonId) {
     const transport = faq.isTransportQuery(normText);
     const intent = grupos.classifyIncoming(normText);
     const asksFaq = location || transport;
-    const withLead = asksFaq && intent && (intent.kind === 'empresa_overview' || intent.kind === 'congreso');
+    const withLead =
+      asksFaq && intent && (intent.kind === 'empresa_overview' || intent.kind === 'congreso' || intent.kind === 'boda');
     if (asksFaq && (faq.shouldAnswerNow(text, normText) || withLead)) {
       const body = faq.reply({
         location,
@@ -173,7 +180,7 @@ async function showMenu(from) {
   await db.clearSession(from);
   await wa.sendButtons(
     from,
-    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "mis reservas", "info", "comidas de Navidad" o "congreso"._`,
+    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "mis reservas", "info", "boda", "comidas de Navidad" o "congreso"._`,
     [
       { id: 'exp_rest', title: '🍽️ Restaurante' },
       { id: 'exp_hotel', title: '🛏️ Hotel' },
@@ -189,8 +196,8 @@ async function sendInfo(from) {
       `📍 ${B.address}\n📞 ${B.phone}\n🌐 ${B.web}\n\n` +
       `🍽️ *Restaurante*: comidas 13:30-15:30 y cenas 20:30-22:30. Cerrado martes y miércoles.\n\n` +
       `🛏️ *Hotel*: reserva online en ${B.hotelBookingUrl} o escríbeme aquí y aviso a recepción.\n\n` +
-      `🎉 *Eventos*: congresos y grupos grandes (capacidad total de 500 a 700; terraza acristalada de 10 a 50). ` +
-      `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. Escribe *eventos* o *congreso*.\n\n` +
+      `🎉 *Eventos*: bodas en exclusiva, congresos y grupos grandes (capacidad total de 500 a 700; terraza acristalada de 10 a 50). ` +
+      `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. Escribe *boda*, *eventos* o *congreso*.\n\n` +
       `Escribe *menu* para volver al inicio.`
   );
 }
@@ -611,7 +618,7 @@ async function handleCancelSelect(from, buttonId) {
   const ok = await db.cancelReservation(id, from);
   await db.clearSession(from);
   if (ok) {
-    const esEvento = row && (row.type === 'evento_empresa' || row.type === 'evento_congreso');
+    const esEvento = row && isPendingEvent(row.type);
     await wa.sendText(
       from,
       esEvento
@@ -654,16 +661,73 @@ async function dispatchGrupo(from, result) {
     }
     await db.clearSession(from);
     await sendReplies(from, grupos.stampId(result.replies, id));
-    if (config.adminPhone && result.reservation.adminText) {
-      const [adminReply] = grupos.stampId([{ kind: 'text', body: result.reservation.adminText }], id);
-      await wa.sendText(config.adminPhone, adminReply.body);
-    }
+    await notifyAdminOfBudget(id, result.reservation);
     return;
   }
 
   if (result.clear) await db.clearSession(from);
   else if (result.data) await db.setSession(from, STEP.GRUPO, result.data);
   await sendReplies(from, result.replies || []);
+}
+
+function formatSendError(err) {
+  const meta = err?.response?.data?.error;
+  if (meta) {
+    const code = meta.code != null ? ` code ${meta.code}` : '';
+    return `${meta.message || 'error de Meta'}${code}`;
+  }
+  return err?.message || String(err);
+}
+
+function oneLine(value) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Primero el texto de sesión. Si Meta lo rechaza (p. ej. 131047, fuera de 24 h),
+// plantilla UTILITY con un solo parámetro. Si también falla, queda marcado en /admin.
+async function notifyAdminOfBudget(id, reservation) {
+  if (!config.adminPhone || !reservation?.adminText) return;
+  try {
+    const [adminReply] = grupos.stampId([{ kind: 'text', body: reservation.adminText }], id);
+    const summarySource = reservation.alertSummary || `Solicitud #{{id}}`;
+    const [summaryReply] = grupos.stampId([{ kind: 'text', body: summarySource }], id);
+    const summary = oneLine(summaryReply.body) || `Solicitud #${id}`;
+
+    try {
+      await wa.sendText(config.adminPhone, adminReply.body);
+      return;
+    } catch (err) {
+      console.error(`[admin-alert] texto de sesión no enviado para #${id}: ${formatSendError(err)}`);
+    }
+
+    try {
+      if (typeof wa.sendTemplate !== 'function') {
+        throw new Error('este proveedor no puede enviar plantillas');
+      }
+      await wa.sendTemplate(config.adminPhone, {
+        name: config.adminAlertTemplate,
+        language: 'es',
+        bodyParameters: [summary],
+      });
+      console.log(`[admin-alert] plantilla ${config.adminAlertTemplate} enviada para #${id}`);
+    } catch (err) {
+      console.error(`[admin-alert] plantilla no enviada para #${id}: ${formatSendError(err)}`);
+      try {
+        await db.markAdminAlertFailed(id);
+      } catch (markErr) {
+        console.error(`[admin-alert] no se pudo marcar el fallo de #${id}: ${markErr.message}`);
+      }
+    }
+  } catch (err) {
+    console.error(`[admin-alert] fallo inesperado en #${id}: ${formatSendError(err)}`);
+    try {
+      await db.markAdminAlertFailed(id);
+    } catch (markErr) {
+      console.error(`[admin-alert] no se pudo marcar el fallo de #${id}: ${markErr.message}`);
+    }
+  }
 }
 
 async function sendReplies(from, replies) {

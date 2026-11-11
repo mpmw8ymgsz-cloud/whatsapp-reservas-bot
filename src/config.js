@@ -17,6 +17,9 @@ module.exports = {
   verifyToken: clean(process.env.VERIFY_TOKEN),
   // Si ADMIN_PHONE no está en Render, avisar al WhatsApp Business de Nicolás Sánchez Monge.
   adminPhone: clean(process.env.ADMIN_PHONE) || '34661724158',
+  // Plantilla UTILITY (idioma es) por si el texto de sesión cae fuera de la ventana de 24 h.
+  // Cuerpo sugerido: "Nueva solicitud de presupuesto en Hostería Don Fadrique: {{1}}. Revísala en el panel de reservas."
+  adminAlertTemplate: clean(process.env.ADMIN_ALERT_TEMPLATE) || 'aviso_solicitud_presupuesto',
   // Plantilla de marketing (comida de Navidad empresas). El envío es manual:
   // nada de esto se manda al arrancar ni por cron.
   marketing: {

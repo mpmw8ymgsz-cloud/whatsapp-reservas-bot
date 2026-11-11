@@ -105,6 +105,23 @@ describe('payload de la plantilla', () => {
     });
   });
 
+  it('un parámetro de body se aplana a una sola línea', () => {
+    const payload = buildTemplatePayload('34661724158', {
+      name: 'aviso_solicitud_presupuesto',
+      language: 'es',
+      bodyParameters: ['Boda · Ana\n\nLuis\t· 12/06 ·     120 invitados · #4'],
+    });
+    assert.equal(payload.template.name, 'aviso_solicitud_presupuesto');
+    assert.deepEqual(payload.template.language, { code: 'es' });
+    assert.deepEqual(payload.template.components, [
+      {
+        type: 'body',
+        parameters: [{ type: 'text', text: 'Boda · Ana Luis · 12/06 · 120 invitados · #4' }],
+      },
+    ]);
+    assert.doesNotMatch(payload.template.components[0].parameters[0].text, /\n|\t| {2,}/);
+  });
+
   it('sin cabecera no manda componente header', () => {
     const payload = buildTemplatePayload('34600000000', {
       name: 'comida_navidad_empresas_2026',

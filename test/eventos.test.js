@@ -5,6 +5,7 @@ const path = require('path');
 const { Settings } = require('luxon');
 
 process.env.ADMIN_PHONE = '34699999999';
+delete process.env.ADMIN_ALERT_TEMPLATE;
 process.env.WHATSAPP_PROVIDER = 'meta';
 process.env.TURSO_DATABASE_URL = 'libsql://example.turso.io';
 process.env.TURSO_AUTH_TOKEN = 'test';
@@ -14,6 +15,14 @@ const sent = [];
 const sessions = new Map();
 const reservations = [];
 const optouts = new Map();
+let failAdminText = false;
+let failAdminTemplate = false;
+
+function metaSendError(message, code) {
+  const err = new Error(message);
+  err.response = { data: { error: { message, code } } };
+  return err;
+}
 
 const mockDb = {
   ready: Promise.resolve(),
@@ -52,6 +61,14 @@ const mockDb = {
   async cancelReservation() {
     return false;
   },
+  async markAdminAlertFailed(id) {
+    const row = reservations[id - 1];
+    if (!row) return;
+    row.admin_alert = 'failed';
+    const note = 'Aviso admin: no enviado';
+    if (!row.details) row.details = note;
+    else if (!row.details.includes(note)) row.details = `${row.details} | ${note}`;
+  },
   async markMarketingOptOut(phone, reason) {
     optouts.set(phone, reason || 'baja');
   },
@@ -62,6 +79,9 @@ const mockDb = {
 
 const mockWa = {
   async sendText(to, body) {
+    if (failAdminText && to === '34699999999') {
+      throw metaSendError('Re-engagement message', 131047);
+    }
     sent.push({ to, kind: 'text', body });
   },
   async sendButtons(to, body, buttons) {
@@ -69,6 +89,10 @@ const mockWa = {
   },
   async sendList(to, body, buttonText, rows) {
     sent.push({ to, kind: 'list', body, buttonText, rows });
+  },
+  async sendTemplate(to, options) {
+    if (failAdminTemplate) throw metaSendError('template not found', 132001);
+    sent.push({ to, kind: 'template', body: options.bodyParameters.join(' '), options });
   },
 };
 
@@ -118,6 +142,8 @@ beforeEach(() => {
   reservations.length = 0;
   sessions.clear();
   optouts.clear();
+  failAdminText = false;
+  failAdminTemplate = false;
   Settings.now = () => new Date('2026-10-22T10:00:00+02:00').getTime();
 });
 
@@ -367,13 +393,172 @@ describe('conversación', () => {
     assert.doesNotMatch(saved.details, FORBIDDEN);
   });
 
-  it('el botón de eventos deja elegir menú o congreso', async () => {
+  it('el botón de eventos deja elegir boda, menú o congreso', async () => {
     const messages = await say('34600000008', 'eventos', 'exp_eventos');
-    assert.deepEqual(messages[0].buttons.map((b) => b.id), ['emp_menus', 'cong_start']);
+    assert.deepEqual(messages[0].buttons.map((b) => b.id), ['boda_start', 'emp_menus', 'cong_start']);
     const body = joined(await say('34600000008', 'menús', 'emp_menus'));
     assert.match(body, /Comidas de Navidad para empresas/);
     assert.match(body, /desde 55 € \+ IVA/);
     assert.doesNotMatch(body, OLD_OFFER);
+  });
+});
+
+describe('bodas, empresa y avisos', () => {
+  function assertBodaIntro(body) {
+    assert.match(body, /exclusiv/);
+    assert.match(body, /[Jj]ardines/);
+    assert.match(body, /terraza acristalada/);
+    assert.match(body, /ceremonia puede celebrarse en el jardín/);
+    assert.match(body, /Guía Michelin/);
+    assert.match(body, /1 Sol Repsol/);
+    assert.match(body, /21 habitaciones dobles/);
+    assert.match(body, /a medida/);
+    assert.match(body, /500 a 700/);
+    assert.match(body, /caso por caso/);
+    assert.match(body, /no queda reservada/);
+    assert.doesNotMatch(body, /\d+\s*€/);
+    assert.doesNotMatch(body, /siempre|nunca/i);
+    assert.doesNotMatch(body, /quieres la mesa|Restaurante Don Fadrique/);
+  }
+
+  async function completarBoda(phone) {
+    await say(phone, 'quiero una boda');
+    await say(phone, 'Ana y Luis');
+    await say(phone, '12/06/2027');
+    await say(phone, 'unas 120');
+    await say(phone, 'sí', 'boda_si');
+    const review = joined(await say(phone, 'habitaciones y autobús para los invitados'));
+    assert.match(review, /email|teléfono|WhatsApp/i);
+    const shown = joined(await say(phone, 'ana@example.com'));
+    assert.match(shown, /Ana y Luis/);
+    assert.match(shown, /120/);
+    assert.match(shown, /Ceremonia en la finca: sí/);
+    assert.match(shown, /no queda reservada/);
+    assert.match(shown, /Traslado/);
+    assert.doesNotMatch(shown, /\d+\s*€/);
+    return say(phone, 'enviar', 'emp_send');
+  }
+
+  it('quiero una boda y quiero reservar una boda abren el presupuesto, no el restaurante', async () => {
+    for (const [phone, phrase] of [
+      ['34600000031', 'quiero una boda'],
+      ['34600000032', 'quiero reservar una boda'],
+      ['34600000033', 'información para bodas'],
+      ['34600000034', 'banquete de boda'],
+      ['34600000035', 'nos queremos casar'],
+    ]) {
+      const messages = await say(phone, phrase);
+      assert.equal(sessions.get(phone).step, 'GRUPO');
+      assert.equal(sessions.get(phone).data.flow, 'boda');
+      assert.equal(sessions.get(phone).data.stage, 'couple');
+      assertBodaIntro(joined(messages));
+      assert.equal(reservations.length, 0);
+    }
+  });
+
+  it('el botón Boda del menú de eventos abre el mismo flujo', async () => {
+    await say('34600000036', 'eventos', 'exp_eventos');
+    const messages = await say('34600000036', 'Boda', 'boda_start');
+    assert.equal(sessions.get('34600000036').data.flow, 'boda');
+    assertBodaIntro(joined(messages));
+  });
+
+  it('guarda la boda como solicitud pendiente y avisa con el texto de sesión', async () => {
+    const phone = '34600000037';
+    const messages = await completarBoda(phone);
+    assert.match(joined(messages), /pendiente de presupuesto/);
+    assert.match(joined(messages), /solicitud nº 1/i);
+    assert.doesNotMatch(joined(messages), /confirmad/i);
+    assert.equal(reservations.length, 1);
+    const saved = reservations[0];
+    assert.equal(saved.type, 'evento_boda');
+    assert.equal(saved.status, 'pending');
+    assert.equal(saved.date, '2027-06-12');
+    assert.equal(saved.time, 'boda');
+    assert.equal(saved.partySize, 120);
+    assert.equal(saved.name, 'Ana y Luis');
+    assert.match(saved.details, /Ceremonia en la finca: sí/);
+    assert.match(saved.details, /ana@example\.com/);
+    assert.match(saved.details, /Traslado: interesado/);
+    assert.equal(saved.admin_alert, undefined);
+    const admin = sent.filter((m) => m.to === '34699999999');
+    assert.equal(admin.length, 1);
+    assert.equal(admin[0].kind, 'text');
+    assert.match(admin[0].body, /SOLICITUD BODA/);
+    assert.match(admin[0].body, /#1/);
+    assert.match(admin[0].body, /Ana y Luis/);
+  });
+
+  it('mesa para 4 mañana sigue siendo el restaurante', async () => {
+    const messages = await say('34600000038', 'mesa para 4 mañana');
+    const body = joined(messages);
+    assert.match(body, /Restaurante Don Fadrique/);
+    assert.match(body, /qué día/i);
+    assert.equal(sessions.get('34600000038').step, 'DATE');
+    assert.notEqual(sessions.get('34600000038').data.flow, 'boda');
+    assert.equal(reservations.length, 0);
+  });
+
+  it('comida de navidad para empresa sigue en el menú de Navidad', async () => {
+    const messages = await say('34600000039', 'comida de navidad para empresa');
+    const body = joined(messages);
+    assert.match(body, /Comidas de Navidad para empresas/);
+    assert.match(body, /desde 55 € \+ IVA/);
+    assert.match(body, /diciembre/);
+    assert.equal(sessions.get('34600000039').data.flow, 'empresa');
+    assert.doesNotMatch(body, /empresa o entidad lo preparo/);
+  });
+
+  it('evento de empresa va al presupuesto de evento, no a la comida de Navidad', async () => {
+    const messages = await say('34600000041', 'evento de empresa');
+    const body = joined(messages);
+    assert.match(body, /500 a 700/);
+    assert.match(body, /empresa o entidad/);
+    assert.equal(sessions.get('34600000041').data.flow, 'congreso');
+    assert.doesNotMatch(body, /Comidas de Navidad|desde 55 €|diciembre de 2026/);
+  });
+
+  it('congreso de 300 personas sigue en el flujo de congreso', async () => {
+    const messages = await say('34600000042', 'congreso de 300 personas');
+    const body = joined(messages);
+    assert.match(body, /500 a 700/);
+    assert.match(body, /empresa o entidad/);
+    assert.equal(sessions.get('34600000042').data.flow, 'congreso');
+    assert.doesNotMatch(body, /Comidas de Navidad|desde 55 €/);
+    assert.equal(reservations.length, 0);
+  });
+
+  it('si el texto a administración falla, avisa con la plantilla y no pierde la solicitud', async () => {
+    failAdminText = true;
+    const phone = '34600000043';
+    const messages = await completarBoda(phone);
+    assert.match(joined(messages), /pendiente de presupuesto/);
+    assert.equal(reservations[0].type, 'evento_boda');
+    assert.equal(reservations[0].admin_alert, undefined);
+    const templates = sent.filter((m) => m.kind === 'template' && m.to === '34699999999');
+    assert.equal(templates.length, 1);
+    assert.equal(templates[0].options.name, 'aviso_solicitud_presupuesto');
+    assert.equal(templates[0].options.language, 'es');
+    assert.equal(templates[0].options.bodyParameters.length, 1);
+    const line = templates[0].options.bodyParameters[0];
+    assert.doesNotMatch(line, /\n|\t| {5,}/);
+    assert.match(line, /^Boda · Ana y Luis · /);
+    assert.match(line, /120 invitados/);
+    assert.match(line, /ana@example\.com/);
+    assert.match(line, /#1$/);
+    assert.equal(sent.filter((m) => m.to === '34699999999' && m.kind === 'text').length, 0);
+  });
+
+  it('si texto y plantilla fallan, la solicitud queda marcada en el panel', async () => {
+    failAdminText = true;
+    failAdminTemplate = true;
+    const messages = await completarBoda('34600000044');
+    assert.match(joined(messages), /solicitud nº 1/i);
+    assert.equal(reservations[0].status, 'pending');
+    assert.equal(reservations[0].type, 'evento_boda');
+    assert.equal(reservations[0].admin_alert, 'failed');
+    assert.match(reservations[0].details, /Aviso admin: no enviado/);
+    assert.equal(sent.filter((m) => m.to === '34699999999').length, 0);
   });
 });
 
@@ -414,12 +599,28 @@ describe('panel de administración', () => {
           details: 'Tipo: congreso médico',
           phone: '34600000007',
         },
+        {
+          id: 11,
+          date: '2027-06-12',
+          time: 'boda',
+          type: 'evento_boda',
+          name: 'Ana y Luis',
+          party_size: 120,
+          details: 'Ceremonia en la finca: sí',
+          phone: '34600000031',
+          admin_alert: 'failed',
+        },
       ],
     });
     assert.match(html, /1 reserva confirmada/);
     assert.match(html, /Ana/);
-    assert.match(html, /Solicitudes de empresa y congresos/);
-    assert.match(html, /2 solicitudes sin confirmar/);
+    assert.match(html, /Solicitudes de boda, empresa y congresos/);
+    assert.match(html, /3 solicitudes sin confirmar/);
+    assert.match(html, /Boda/);
+    assert.match(html, /Ana y Luis/);
+    assert.match(html, /aviso no enviado/);
+    assert.match(html, /alert-failed/);
+    assert.match(html, /1 solicitud no llegó a administración por WhatsApp/);
     assert.match(html, /Talleres &lt;Alba&gt;/);
     assert.match(html, /Pendiente de presupuesto/);
     assert.match(html, /Congreso/);
