@@ -17,6 +17,14 @@ function cellToValue(cell) {
   return cell.value;
 }
 
+function phoneDigits(value) {
+  if (value == null) return '';
+  let digits = String(value).trim().replace(/[\s().-]/g, '');
+  if (digits.startsWith('+')) digits = digits.slice(1);
+  else if (digits.startsWith('00')) digits = digits.slice(2);
+  return digits.replace(/\D/g, '');
+}
+
 function rowsToObjects(result) {
   const names = result.cols.map((c) => c.name);
   return result.rows.map((row) => {
@@ -78,6 +86,17 @@ const ready = (async () => {
     phone TEXT PRIMARY KEY,
     reason TEXT,
     created_at TEXT NOT NULL
+  )`);
+  // Meta avisa después del envío (sent, delivered, read, failed). Una fila por aviso.
+  await execute(`CREATE TABLE IF NOT EXISTS message_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    wamid TEXT NOT NULL,
+    recipient TEXT,
+    status TEXT,
+    error_code TEXT,
+    error_title TEXT,
+    error_detail TEXT,
+    ts TEXT
   )`);
 })().catch((err) => {
   console.error('Error inicializando la base de datos en Turso:', err.message);
@@ -223,5 +242,51 @@ module.exports = {
     await ready;
     const result = await execute('SELECT phone FROM marketing_optouts WHERE phone = ?', [phone]);
     return rowsToObjects(result).length > 0;
+  },
+
+  async saveMessageStatus({ wamid, recipient, status, error_code, error_title, error_detail, ts }) {
+    await ready;
+    await execute(
+      `INSERT INTO message_status (wamid, recipient, status, error_code, error_title, error_detail, ts)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        wamid != null ? String(wamid) : '',
+        recipient != null ? String(recipient) : null,
+        status != null ? String(status) : null,
+        error_code != null && error_code !== '' ? String(error_code) : null,
+        error_title != null && error_title !== '' ? String(error_title) : null,
+        error_detail != null && error_detail !== '' ? String(error_detail) : null,
+        ts != null && ts !== '' ? String(ts) : null,
+      ]
+    );
+  },
+
+  async listMessageStatuses({ wamid, phone, limit = 50 } = {}) {
+    await ready;
+    const filters = [];
+    const args = [];
+    const wamidFilter = wamid != null && String(wamid).trim() !== '' ? String(wamid).trim() : '';
+    const phoneFilter = phoneDigits(phone);
+    if (wamidFilter) {
+      filters.push('wamid = ?');
+      args.push(wamidFilter);
+    }
+    if (phoneFilter) {
+      filters.push('recipient = ?');
+      args.push(phoneFilter);
+    }
+    const requested = Number(limit);
+    const cap = Math.min(Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 50, 50);
+    args.push(cap);
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const result = await execute(
+      `SELECT id, wamid, recipient, status, error_code, error_title, error_detail, ts
+       FROM message_status
+       ${where}
+       ORDER BY id DESC
+       LIMIT ?`,
+      args
+    );
+    return rowsToObjects(result);
   },
 };
