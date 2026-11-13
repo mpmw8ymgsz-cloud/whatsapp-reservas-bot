@@ -74,6 +74,33 @@ function alertFailed(row) {
   return row.admin_alert === 'failed' || /Aviso admin: no enviado/.test(row.details || '');
 }
 
+function isBudgetEvent(type) {
+  return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda';
+}
+
+function pendingStatusText(row) {
+  const base = isBudgetEvent(row.type) ? 'Pendiente de presupuesto' : 'Pendiente de confirmación';
+  return alertFailed(row) ? `${base} · aviso no enviado` : base;
+}
+
+function deferredNote(row) {
+  return row && row.customer_notice === 'deferred' ? ' (el cliente se entera al volver a escribir)' : '';
+}
+
+function actionCell(row, adminKey) {
+  if (!adminKey) return '';
+  const id = encodeURIComponent(row.id);
+  const key = esc(encodeURIComponent(adminKey));
+  return (
+    `<td class="actions">` +
+    `<form method="post" action="/admin/reservations/${id}/confirm?key=${key}">` +
+    `<button type="submit">Confirmar</button></form>` +
+    `<form method="post" action="/admin/reservations/${id}/reject?key=${key}">` +
+    `<input name="reason" placeholder="Motivo opcional" maxlength="300">` +
+    `<button type="submit">Rechazar</button></form></td>`
+  );
+}
+
 function collectStatuses(body) {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   const statuses = [];
@@ -214,44 +241,76 @@ async function loadAdminPageData() {
   const fromDate = today.toFormat('yyyy-MM-dd');
   const toDate = today.plus({ days: 30 }).toFormat('yyyy-MM-dd');
   const confirmed = await db.getReservationsByDateRange(fromDate, toDate);
-  const pending = await db.getPendingEventRequests();
+  const pendingEvents = await db.getPendingEventRequests();
+  let pending = pendingEvents;
+  if (typeof db.listPendingReservations === 'function') {
+    const allPending = await db.listPendingReservations();
+    const seen = new Set(pendingEvents.map((row) => row.id));
+    pending = pendingEvents.concat(allPending.filter((row) => !seen.has(row.id)));
+  }
+  let rejected = [];
+  if (typeof db.listRejectedReservations === 'function') {
+    try {
+      rejected = await db.listRejectedReservations();
+    } catch (err) {
+      console.error('Error cargando solicitudes rechazadas:', err);
+    }
+  }
   let statuses = [];
   try {
     statuses = await db.listMessageStatuses({ limit: 50 });
   } catch (err) {
     console.error('Error cargando estados de envío:', err);
   }
-  return { confirmed, pending, statuses };
+  return { confirmed, pending, rejected, statuses };
 }
 
-function renderAdminPage({ businessName, confirmed, pending, statuses }) {
+function renderAdminPage({ businessName, confirmed, pending, rejected, statuses, adminKey }) {
   const confirmedRows = confirmed
     .map(
       (r) =>
         `<tr><td>#${esc(r.id)}</td><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${typeLabel(r.type)}</td>` +
-        `<td>${esc(r.name)}</td><td>${esc(r.party_size || '-')}</td><td>${esc(r.details || '')}</td>` +
+        `<td>${esc(r.name)}</td><td>${esc(r.party_size || '-')}</td><td>${esc((r.details || '') + deferredNote(r))}</td>` +
         `<td>${waLink(r.phone)}</td></tr>`
     )
     .join('');
 
-  const pendingRows = pending
+  const pendingList = Array.isArray(pending) ? pending : [];
+  const rejectedList = Array.isArray(rejected) ? rejected : [];
+  const actionHeader = adminKey ? '<th>Acción</th>' : '';
+  const pendingCols = adminKey ? 10 : 9;
+  const pendingRows = pendingList
     .map((r) => {
       const failed = alertFailed(r);
-      const status = failed
-        ? 'Pendiente de presupuesto · aviso no enviado'
-        : 'Pendiente de presupuesto';
+      const status = pendingStatusText(r);
       return (
         `<tr class="${failed ? 'alert-failed' : ''}"><td>#${esc(r.id)}</td><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${typeLabel(r.type)}</td>` +
         `<td>${esc(r.name)}</td><td>${esc(r.party_size || '-')}</td><td>${esc(r.details || '')}</td>` +
-        `<td>${waLink(r.phone)}</td><td>${status}</td></tr>`
+        `<td>${waLink(r.phone)}</td><td>${status}</td>${actionCell(r, adminKey)}</tr>`
       );
     })
     .join('');
 
+  const rejectedRows = rejectedList
+    .map(
+      (r) =>
+        `<tr><td>#${esc(r.id)}</td><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${typeLabel(r.type)}</td>` +
+        `<td>${esc(r.name)}</td><td>${esc(r.party_size || '-')}</td><td>${esc(r.reject_reason || '')}</td>` +
+        `<td>${esc(deferredNote(r) || 'avisado')}</td></tr>`
+    )
+    .join('');
+  const rejectedSection = rejectedList.length
+    ? `<h2>Solicitudes rechazadas</h2>
+  <table>
+    <tr><th>Nº</th><th>Fecha</th><th>Servicio</th><th>Tipo</th><th>Contacto</th><th>Pers.</th><th>Motivo</th><th>Aviso</th></tr>
+    ${rejectedRows}
+  </table>`
+    : '';
+
   const confirmedLabel =
     confirmed.length === 1 ? '1 reserva confirmada' : `${confirmed.length} reservas confirmadas`;
   const pendingLabel =
-    pending.length === 1 ? '1 solicitud sin confirmar' : `${pending.length} solicitudes sin confirmar`;
+    pendingList.length === 1 ? '1 solicitud sin confirmar' : `${pendingList.length} solicitudes sin confirmar`;
   const statusRows = (Array.isArray(statuses) ? statuses : [])
     .map((row) => {
       const failed = String(row.status || '').toLowerCase() === 'failed';
@@ -267,7 +326,7 @@ function renderAdminPage({ businessName, confirmed, pending, statuses }) {
     })
     .join('');
 
-  const failedCount = pending.filter(alertFailed).length;
+  const failedCount = pendingList.filter(alertFailed).length;
   const failedNote = failedCount
     ? `<p class="alert-banner"><strong>Aviso no enviado:</strong> ${
         failedCount === 1
@@ -300,12 +359,14 @@ function renderAdminPage({ businessName, confirmed, pending, statuses }) {
     ${confirmedRows || '<tr><td colspan="8">Sin reservas próximas</td></tr>'}
   </table>
   <h2>Solicitudes de boda, empresa y congresos · pendientes de presupuesto</h2>
-  <p>${pendingLabel}, también fuera de los 30 días.</p>
+  <p>${pendingLabel}, también fuera de los 30 días. Aquí salen también las mesas, menús y habitaciones que aún no has confirmado.</p>
+  <p>Por WhatsApp: <strong>OK 123</strong> confirma y <strong>NO 123 motivo</strong> rechaza. Si solo hay una pendiente, basta con OK o NO.</p>
   ${failedNote}
   <table>
-    <tr><th>Nº</th><th>Fecha</th><th>Servicio</th><th>Tipo</th><th>Contacto</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th><th>Estado</th></tr>
-    ${pendingRows || '<tr><td colspan="9">Sin solicitudes pendientes</td></tr>'}
+    <tr><th>Nº</th><th>Fecha</th><th>Servicio</th><th>Tipo</th><th>Contacto</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th><th>Estado</th>${actionHeader}</tr>
+    ${pendingRows || `<tr><td colspan="${pendingCols}">Sin solicitudes pendientes</td></tr>`}
   </table>
+  ${rejectedSection}
   <h2>Últimos estados de envío</h2>
   <p>Meta avisa después si el mensaje salió, llegó, se leyó o falló. Un fallo en rojo trae el código: 131042 (pago), 131049 (límite de marketing) o 131026 (no entregable).</p>
   <table>
@@ -318,6 +379,7 @@ function renderAdminPage({ businessName, confirmed, pending, statuses }) {
 function createApp(onMessage, deps = {}) {
   const app = express();
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
   app.get(['/menus', '/menus/'], (req, res) => {
     res.type('html').send(menusPaginas.indexHtml());
   });
@@ -352,6 +414,9 @@ function createApp(onMessage, deps = {}) {
   const listMessageStatuses =
     deps.listMessageStatuses || ((filters) => require('./db').listMessageStatuses(filters));
   const markRead = deps.markRead || ((id) => wa.markRead(id));
+  const sendAdminText = deps.sendAdminText || ((to, body) => wa.sendText(to, body));
+  const decideReservation =
+    deps.decideReservation || ((args) => require('./reservasDecision').applyDecision(args));
   const loadAdmin = deps.loadAdmin;
   let campaignInFlight = false;
 
@@ -435,6 +500,47 @@ function createApp(onMessage, deps = {}) {
     }
   });
 
+  function wantsJson(req) {
+    const type = String(req.get('content-type') || '');
+    if (type.includes('application/json')) return true;
+    return String(req.get('accept') || '').includes('application/json');
+  }
+
+  async function decideFromPanel(req, res, action) {
+    if (!adminAuthorized(req)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Acceso denegado. Falta la clave (cabecera x-admin-key o ?key=).',
+      });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, error: 'El número de solicitud no es válido.' });
+    }
+    const rawReason = req.body && (req.body.reason || req.body.motivo);
+    const reason = rawReason == null ? '' : String(rawReason);
+    try {
+      const result = await decideReservation({ id, action, reason });
+      if (result.httpStatus === 200 && result.adminText && config.adminPhone) {
+        try {
+          await sendAdminText(config.adminPhone, result.adminText);
+        } catch (err) {
+          console.error('[decision] no se pudo avisar al admin:', err.message);
+        }
+      }
+      if (wantsJson(req)) return res.status(result.httpStatus).json(result.body);
+      const key = req.get('x-admin-key') || req.query.key || (req.body && req.body.key) || '';
+      return res.redirect(303, `/admin?key=${encodeURIComponent(String(key))}`);
+    } catch (err) {
+      console.error('[decision] error en el panel:', err.message);
+      if (wantsJson(req)) return res.status(500).json({ ok: false, error: 'No se pudo actualizar la solicitud' });
+      return res.status(500).send('No se pudo actualizar la solicitud');
+    }
+  }
+
+  app.post('/admin/reservations/:id/confirm', (req, res) => decideFromPanel(req, res, 'confirm'));
+  app.post('/admin/reservations/:id/reject', (req, res) => decideFromPanel(req, res, 'reject'));
+
   // Panel de reservas para el equipo (protegido con clave: /admin?key=...)
   app.get('/admin', async (req, res) => {
     const adminKey = process.env.ADMIN_KEY;
@@ -443,7 +549,9 @@ function createApp(onMessage, deps = {}) {
     }
     try {
       const data = loadAdmin ? await loadAdmin() : await loadAdminPageData();
-      res.type('html').send(renderAdminPage({ businessName: config.business.name, ...data }));
+      res.type('html').send(
+        renderAdminPage({ businessName: config.business.name, adminKey: req.query.key, ...data })
+      );
     } catch (err) {
       console.error('Error en /admin:', err);
       res.status(500).send('Error cargando reservas');

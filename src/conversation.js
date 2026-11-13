@@ -9,6 +9,8 @@ const faq = require('./faqLlegada');
 const marketing = require('./marketing');
 const fotos = require('./fotos');
 const menusFiesta = require('./menusFiesta');
+const confirmacion = require('./confirmacion');
+const { applyDecision } = require('./reservasDecision');
 
 const B = config.business;
 
@@ -31,12 +33,13 @@ function expConfig() {
   return B.restaurant;
 }
 
-function expLabel(type) {
+function expLabel(type, status) {
   if (type === 'evento_empresa') return 'Empresa · pendiente';
   if (type === 'evento_congreso') return 'Congreso · pendiente';
   if (type === 'evento_boda') return 'Boda · pendiente';
-  if (type === 'hotel') return 'Hotel';
+  if (type === 'hotel') return status === 'pending' ? 'Hotel · pendiente' : 'Hotel';
   if (type === 'otivm') return 'OTIVM (histórico)';
+  if (status === 'pending') return 'Restaurante · pendiente';
   return 'Restaurante Don Fadrique';
 }
 
@@ -53,17 +56,57 @@ function isPendingEvent(type) {
   return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda';
 }
 
+function inboundIso(rawMessage) {
+  const ts = rawMessage && rawMessage.timestamp;
+  if (ts != null && /^\d{10,13}$/.test(String(ts))) {
+    const raw = String(ts);
+    const ms = raw.length >= 13 ? Number(raw) : Number(raw) * 1000;
+    if (Number.isFinite(ms)) return new Date(ms).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+async function noteInbound(from, rawMessage) {
+  if (typeof db.touchLastInbound !== 'function') return;
+  try {
+    await db.touchLastInbound(from, inboundIso(rawMessage));
+  } catch (err) {
+    console.error('[inbound] no se pudo guardar la hora:', err.message);
+  }
+}
+
+async function deliverDeferred(from) {
+  if (typeof db.listDeferredNotices !== 'function') return;
+  let rows = [];
+  try {
+    rows = await db.listDeferredNotices(from);
+  } catch (err) {
+    console.error('[aviso] no se pudieron leer avisos pendientes:', err.message);
+    return;
+  }
+  for (const row of rows) {
+    try {
+      const body = row.status === 'rejected' ? confirmacion.customerRejected(row) : confirmacion.customerConfirmed(row);
+      await wa.sendText(from, body);
+      if (typeof db.setCustomerNotice === 'function') await db.setCustomerNotice(row.id, 'sent');
+    } catch (err) {
+      console.error(`[aviso] no se pudo entregar #${row.id}:`, err.message);
+    }
+  }
+}
+
 async function handleIncoming(from, text, buttonId, rawMessage) {
   const normText = normalize(text);
   const routedButton = marketing.routeButtonId(buttonId);
   const incomingImage = !!(rawMessage && rawMessage.type === 'image');
 
-  // Comandos de administrador (solo desde el número del negocio)
-  if (config.adminPhone && from === config.adminPhone) {
-    if (['hoy', 'reservas hoy'].includes(normText)) return sendAdminList(from, 0);
-    if (['manana', 'reservas manana'].includes(normText)) return sendAdminList(from, 1);
-    if (['semana', 'reservas semana'].includes(normText)) return sendAdminList(from, 7);
+  // El teléfono de Nico no entra en el flujo del cliente: confirma o rechaza solicitudes.
+  if (confirmacion.isAdminSender(from, config.adminPhone)) {
+    return handleAdmin(from, normText, text);
   }
+
+  await noteInbound(from, rawMessage);
+  await deliverDeferred(from);
 
   // Baja de la plantilla de marketing (texto "BAJA" o botón "No me interesa").
   if (marketing.isOptOut(normText, routedButton)) {
@@ -364,7 +407,7 @@ async function quoteHotel(from, session) {
       `📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s)\n👥 ${d.pax} personas\n\n` +
       `💶 *Precio: ${pms.precioTotal.toFixed(2)}€* en total (${pms.precioNoche.toFixed(2)}€/noche)\n` +
       `_Solo alojamiento. El pago se realiza a tu llegada al hotel._\n\n` +
-      `¿Confirmo la reserva?`,
+      `¿Envío la solicitud? El equipo la confirma y te aviso por aquí.`,
     [
       { id: 'confirm_yes', title: '✅ Confirmar' },
       { id: 'confirm_no', title: '❌ No, gracias' },
@@ -379,41 +422,35 @@ async function handleHotelQuote(from, buttonId, session, text) {
   const d = session.data;
 
   if (isYes) {
-    const conf = await hotelApi.confirmReservation(d.pmsId);
-    await db.clearSession(from);
-
     const photoNote = fotos.clientPhotoNote(d);
     const detalles = `Entrada ${d.entrada}, Salida ${d.salida}, ${d.noches} noche(s), ${d.pax} pers. | Hab ${d.habitacion} | ${d.precioTotal} EUR | PMS ${d.pmsId}` +
-      (conf.ok ? '' : ' | AVISO: no se pudo pasar a confirmada') +
       (photoNote ? ` | ${photoNote}` : '');
-    const localId = await db.createReservation({
-      phone: from,
+    await finishPendingReservation(from, {
       name: d.name,
       partySize: d.pax,
       date: d.entrada,
       time: '--:--',
       type: 'hotel',
       details: detalles,
+      customerLines: [
+        'Habitación',
+        `Entrada: ${d.entradaLabel}`,
+        `Salida: ${d.salidaLabel}`,
+        `${d.noches} noche(s) · ${d.pax} personas`,
+        `Total: ${Number(d.precioTotal).toFixed(2)} € (se paga a la llegada)`,
+        d.name,
+      ],
+      adminHeading: '🛏️ HOTEL',
+      adminLines: [
+        `Hab: ${d.habitacion}`,
+        `Entrada: ${d.entrada}`,
+        `Salida: ${d.salida}`,
+        `${d.noches} noche(s) · ${d.pax} pers.`,
+        `💶 ${Number(d.precioTotal).toFixed(2)} € (paga a la llegada)`,
+        `PMS ${d.pmsId} (sigue pendiente hasta que confirmes)`,
+        photoNote,
+      ],
     });
-
-    await wa.sendText(
-      from,
-      `¡Reserva confirmada! 🎉🛏️\n\n` +
-        `📅 Entrada: ${d.entradaLabel}\n📅 Salida: ${d.salidaLabel}\n🌙 ${d.noches} noche(s) · 👥 ${d.pax} personas\n` +
-        `💶 Total: ${d.precioTotal.toFixed(2)}€ — *se paga a la llegada*\n\n` +
-        `Te esperamos en ${B.name}.\n📍 ${B.address}\n\n_Para cancelar, escribe "mis reservas"._`
-    );
-
-    if (config.adminPhone) {
-      await wa.sendText(
-        config.adminPhone,
-        `🛏️ RESERVA HOTEL CONFIRMADA (bot) #${localId}\n` +
-          `Hab: ${d.habitacion}\nEntrada: ${d.entrada}\nSalida: ${d.salida}\n${d.noches} noche(s) · ${d.pax} pers.\n` +
-          `Cliente: ${d.name}\nTel: ${from}\n💶 ${d.precioTotal.toFixed(2)}€ (paga a la llegada)\n\n` +
-          (conf.ok ? `✅ Confirmada en el PMS (${d.pmsId})` : `⚠️ En el PMS sigue como PENDIENTE (${d.pmsId}) - revisar`) +
-          (photoNote ? `\n${photoNote}` : '')
-      );
-    }
     return;
   }
 
@@ -543,7 +580,7 @@ async function goToConfirm(from, session) {
 
   if (d.menuId) {
     const resumen =
-      `Confirma tu reserva del *${d.menuTitle}*:\n📅 ${d.dateLabel}\n💶 ${d.menuPrice}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Confirmo?`;
+      `Confirma tu reserva del *${d.menuTitle}*:\n📅 ${d.dateLabel}\n💶 ${d.menuPrice}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Envío la solicitud?`;
     await wa.sendButtons(from, resumen, [
       { id: 'confirm_yes', title: '✅ Confirmar' },
       { id: 'confirm_no', title: '❌ Cancelar' },
@@ -551,7 +588,7 @@ async function goToConfirm(from, session) {
     return;
   }
 
-  const resumen = `Confirma tu reserva en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Confirmo?`;
+  const resumen = `Confirma tu solicitud en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Envío la solicitud?`;
 
   await wa.sendButtons(from, resumen, [
     { id: 'confirm_yes', title: '✅ Confirmar' },
@@ -570,31 +607,17 @@ async function handleConfirmStep(from, buttonId, session, text) {
     if (d.menuId) return confirmMenuReservation(from, session);
 
     const photoNote = fotos.clientPhotoNote(d);
-    const id = await db.createReservation({
-      phone: from,
+    await finishPendingReservation(from, {
       name: d.name,
       partySize: d.partySize,
       date: d.date,
       time: d.time,
       type: d.type,
       details: photoNote || undefined,
+      customerLines: ['Mesa en el restaurante', `${d.dateLabel} · ${d.time}`, `${d.partySize} personas`, d.name],
+      adminHeading: '🍽️ RESTAURANTE',
+      adminLines: [`${d.dateLabel} ${d.time}`, `${d.partySize} personas`, photoNote],
     });
-    await db.clearSession(from);
-
-    await wa.sendText(
-      from,
-      `¡Mesa confirmada! 🍽️🎉 (nº ${id})\n📅 ${d.dateLabel} a las ${d.time}\n👥 ${d.partySize} personas\n\n` +
-        `Te esperamos en ${B.name}.\n📍 ${B.address}\n\n_Para cancelar, escribe "mis reservas"._`
-    );
-
-    if (config.adminPhone) {
-      const tipo = '🍽️ RESTAURANTE';
-      await wa.sendText(
-        config.adminPhone,
-        `${tipo} — reserva #${id}\n${d.dateLabel} ${d.time}\n${d.partySize} personas\nNombre: ${d.name}\nTel: ${from}` +
-          (photoNote ? `\n${photoNote}` : '')
-      );
-    }
     return;
   }
 
@@ -608,6 +631,23 @@ async function handleConfirmStep(from, buttonId, session, text) {
 
 // ---------- Comandos de administrador ----------
 
+async function handleAdmin(from, normText, rawText) {
+  if (['hoy', 'reservas hoy'].includes(normText)) return sendAdminList(from, 0);
+  if (['manana', 'reservas manana'].includes(normText)) return sendAdminList(from, 1);
+  if (['semana', 'reservas semana'].includes(normText)) return sendAdminList(from, 7);
+
+  const parsed = confirmacion.parseAdminDecision(rawText);
+  if (!parsed) return wa.sendText(from, confirmacion.adminHelp());
+
+  try {
+    const result = await applyDecision(parsed);
+    await wa.sendText(from, result.adminText);
+  } catch (err) {
+    console.error('[decision]', err.message);
+    await wa.sendText(from, 'No he podido actualizar esa solicitud. Prueba de nuevo o usa el panel.');
+  }
+}
+
 async function sendAdminList(from, daysAhead) {
   const zone = B.timezone;
   const start = DateTime.now().setZone(zone).startOf('day');
@@ -616,7 +656,11 @@ async function sendAdminList(from, daysAhead) {
   const toDate = end.toFormat('yyyy-MM-dd');
 
   const list = await db.getReservationsByDateRange(fromDate, toDate);
-  const pending = (await db.getPendingEventRequests()).filter((r) => r.date >= fromDate && r.date <= toDate);
+  const pendingSource =
+    typeof db.listPendingReservations === 'function'
+      ? await db.listPendingReservations()
+      : await db.getPendingEventRequests();
+  const pending = pendingSource.filter((r) => r.date >= fromDate && r.date <= toDate);
   if (list.length === 0 && pending.length === 0) {
     return wa.sendText(from, `📋 Sin reservas entre ${fromDate} y ${toDate}.`);
   }
@@ -634,12 +678,12 @@ async function sendAdminList(from, daysAhead) {
     }
   }
   if (pending.length) {
-    msg += `\n⏳ *Solicitudes de eventos pendientes de presupuesto*\n`;
+    msg += `\n⏳ *Solicitudes pendientes de confirmación*\n`;
     for (const r of pending) {
       msg += `${typeIcon(r.type)} #${r.id} ${r.date} ${r.time} · ${r.name}${r.party_size ? ' · ' + r.party_size + 'p' : ''}${r.details ? ' · ' + r.details : ''} · 📱${r.phone}\n`;
     }
   }
-  msg += `\n_Comandos: "hoy", "mañana", "semana"_`;
+  msg += `\n_Comandos: "hoy", "mañana", "semana". Para una solicitud: OK 123 o NO 123 motivo._`;
   await wa.sendText(from, msg);
 }
 
@@ -655,7 +699,7 @@ async function showMyReservations(from) {
     return {
       id: `cancel_${r.id}`,
       title: `#${r.id} ${r.date} ${r.time}`.slice(0, 24),
-      description: `${typeIcon(r.type)} ${expLabel(r.type)}${r.party_size ? ' · ' + r.party_size + 'p' : ''}`.slice(0, 72),
+      description: `${typeIcon(r.type)} ${expLabel(r.type, r.status)}${r.party_size ? ' · ' + r.party_size + 'p' : ''}`.slice(0, 72),
     };
   });
   await db.setSession(from, STEP.CANCEL_SELECT, {});
@@ -672,13 +716,11 @@ async function handleCancelSelect(from, buttonId) {
   const ok = await db.cancelReservation(id, from);
   await db.clearSession(from);
   if (ok) {
-    const esEvento = row && isPendingEvent(row.type);
-    await wa.sendText(
-      from,
-      esEvento
-        ? `Solicitud #${id} anulada. Seguía pendiente de presupuesto.`
-        : `Reserva #${id} cancelada. ¡Esperamos verte pronto! 👋`
-    );
+    let text;
+    if (row && isPendingEvent(row.type)) text = `Solicitud #${id} anulada. Seguía pendiente de presupuesto.`;
+    else if (row && row.status === 'pending') text = `Solicitud #${id} anulada. Seguía pendiente de confirmación.`;
+    else text = `Reserva #${id} cancelada. ¡Esperamos verte pronto! 👋`;
+    await wa.sendText(from, text);
     if (config.adminPhone) {
       await wa.sendText(config.adminPhone, `❌ CANCELACIÓN — reserva #${id} (tel ${from})`);
     }
@@ -750,7 +792,7 @@ async function notifyAdminOfBudget(id, reservation) {
     const summary = oneLine(summaryReply.body) || `Solicitud #${id}`;
 
     try {
-      await wa.sendText(config.adminPhone, adminReply.body);
+      await wa.sendText(config.adminPhone, `${adminReply.body}\n\n${confirmacion.adminInstructions(id)}`);
       return;
     } catch (err) {
       console.error(`[admin-alert] texto de sesión no enviado para #${id}: ${formatSendError(err)}`);
@@ -859,32 +901,68 @@ async function startMenuReservation(from, which) {
   ]);
 }
 
+async function finishPendingReservation(from, fields) {
+  const id = await db.createReservation({
+    phone: from,
+    name: fields.name,
+    partySize: fields.partySize,
+    date: fields.date,
+    time: fields.time,
+    type: fields.type,
+    details: fields.details,
+    status: 'pending',
+  });
+  await db.clearSession(from);
+  await wa.sendText(
+    from,
+    confirmacion.customerPending({
+      id,
+      businessName: B.name,
+      lines: fields.customerLines,
+    })
+  );
+  const adminLines = (fields.adminLines || []).filter((line) => line != null && String(line).trim() !== '');
+  const adminBody = [
+    `${fields.adminHeading} — solicitud #${id} pendiente`,
+    ...adminLines,
+    `Nombre: ${fields.name}`,
+    `Tel: ${from}`,
+    '',
+    confirmacion.adminInstructions(id),
+  ].join('\n');
+  await notifyAdminText(id, adminBody);
+  return id;
+}
+
+async function notifyAdminText(id, body) {
+  if (!config.adminPhone) return;
+  try {
+    await wa.sendText(config.adminPhone, body);
+  } catch (err) {
+    console.error(`[admin-alert] texto no enviado para #${id}: ${formatSendError(err)}`);
+    try {
+      if (typeof db.markAdminAlertFailed === 'function') await db.markAdminAlertFailed(id);
+    } catch (markErr) {
+      console.error(`[admin-alert] no se pudo marcar el fallo de #${id}: ${markErr.message}`);
+    }
+  }
+}
+
 async function confirmMenuReservation(from, session) {
   const d = session.data;
   const photoNote = fotos.clientPhotoNote(d);
   const details = `${d.menuTitle} · ${d.menuPrice}` + (photoNote ? ` | ${photoNote}` : '');
-  const id = await db.createReservation({
-    phone: from,
+  await finishPendingReservation(from, {
     name: d.name,
     partySize: d.partySize,
     date: d.date,
     time: d.time,
     type: 'restaurante',
     details,
+    customerLines: [d.menuTitle, d.dateLabel, d.menuPrice, `${d.partySize} personas`, d.name],
+    adminHeading: '🍽️ RESTAURANTE',
+    adminLines: [d.menuTitle, d.dateLabel, d.menuPrice, `${d.partySize} personas`, photoNote],
   });
-  await db.clearSession(from);
-  await wa.sendText(
-    from,
-    `¡Reserva confirmada! 🍽️🎉 (nº ${id})\n*${d.menuTitle}*\n📅 ${d.dateLabel}\n💶 ${d.menuPrice}\n👥 ${d.partySize} personas\n\n` +
-      `Te esperamos en ${B.name}.\n📍 ${B.address}\n\n_Para cancelar, escribe "mis reservas"._`
-  );
-  if (config.adminPhone) {
-    await wa.sendText(
-      config.adminPhone,
-      `🍽️ RESTAURANTE — reserva #${id}\n${d.menuTitle}\n${d.dateLabel}\n${d.menuPrice}\n${d.partySize} personas\nNombre: ${d.name}\nTel: ${from}` +
-        (photoNote ? `\n${photoNote}` : '')
-    );
-  }
 }
 
 function holidayMenusNow(session, norm, which) {

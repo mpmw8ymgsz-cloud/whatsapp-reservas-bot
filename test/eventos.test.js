@@ -18,6 +18,9 @@ const optouts = new Map();
 let failAdminText = false;
 let failAdminTemplate = false;
 let failImages = false;
+let failWindowFor = null;
+const hotelCalls = [];
+const inboundAt = new Map();
 
 function metaSendError(message, code) {
   const err = new Error(message);
@@ -41,8 +44,49 @@ const mockDb = {
   },
   async upsertCustomerName() {},
   async createReservation(record) {
-    reservations.push({ ...record });
-    return reservations.length;
+    const id = reservations.length + 1;
+    reservations.push({
+      ...record,
+      id,
+      party_size: record.partySize,
+      customer_notice: null,
+      reject_reason: null,
+      decided_at: null,
+    });
+    return id;
+  },
+  async listPendingReservations() {
+    return reservations.filter((row) => row.status === 'pending');
+  },
+  async getReservation(id) {
+    return reservations.find((row) => row.id === Number(id)) || null;
+  },
+  async updateReservationDecision(id, { status, reason, customerNotice }) {
+    const row = reservations.find((item) => item.id === Number(id) && item.status === 'pending');
+    if (!row) return false;
+    row.status = status;
+    row.reject_reason = reason || null;
+    row.customer_notice = customerNotice || null;
+    row.decided_at = new Date().toISOString();
+    return true;
+  },
+  async setCustomerNotice(id, notice) {
+    const row = reservations.find((item) => item.id === Number(id));
+    if (row) row.customer_notice = notice;
+  },
+  async listDeferredNotices(phone) {
+    return reservations.filter((row) => {
+      if (row.phone !== phone) return false;
+      if (row.status !== 'confirmed' && row.status !== 'rejected') return false;
+      if (row.customer_notice === 'deferred') return true;
+      return row.customer_notice == null && row.decided_at;
+    });
+  },
+  async touchLastInbound(phone, at) {
+    inboundAt.set(phone, at || new Date().toISOString());
+  },
+  async getLastInbound(phone) {
+    return inboundAt.has(phone) ? inboundAt.get(phone) : null;
   },
   async countReservations() {
     return 0;
@@ -83,6 +127,9 @@ const mockWa = {
     if (failAdminText && to === '34699999999') {
       throw metaSendError('Re-engagement message', 131047);
     }
+    if (failWindowFor && to === failWindowFor) {
+      throw metaSendError('Re-engagement message', 131047);
+    }
     sent.push({ to, kind: 'text', body });
   },
   async sendButtons(to, body, buttons) {
@@ -107,11 +154,23 @@ const mockWa = {
   },
 };
 
+const mockHotel = {
+  async confirmReservation(id) {
+    hotelCalls.push({ action: 'confirm', id: String(id) });
+    return { ok: true };
+  },
+  async deleteReservation(id) {
+    hotelCalls.push({ action: 'delete', id: String(id) });
+    return { ok: true };
+  },
+};
+
 const Module = require('module');
 const originalRequire = Module.prototype.require;
 Module.prototype.require = function (id) {
   if (id === './db' || id === '../db') return mockDb;
   if (id === './wa' || id === '../wa') return mockWa;
+  if (id === './hotelApi' || id === '../hotelApi') return mockHotel;
   return originalRequire.apply(this, arguments);
 };
 
@@ -159,6 +218,9 @@ beforeEach(() => {
   failAdminText = false;
   failAdminTemplate = false;
   failImages = false;
+  failWindowFor = null;
+  hotelCalls.length = 0;
+  inboundAt.clear();
   Settings.now = () => new Date('2026-10-22T10:00:00+02:00').getTime();
 });
 
@@ -237,7 +299,7 @@ describe('conversación', () => {
     assert.doesNotMatch(body, /35|¿Qué día/);
   });
 
-  it('la reserva de mesa del restaurante sigue confirmándose', async () => {
+  it('la reserva de mesa queda pendiente hasta que administración la confirme', async () => {
     let body = joined(await say('34600000002', 'quiero una mesa'));
     assert.match(body, /Restaurante Don Fadrique/);
     assert.match(body, /qué día/i);
@@ -255,12 +317,20 @@ describe('conversación', () => {
     await say('34600000002', '4');
     await say('34600000002', 'Ana Ruiz');
     body = joined(await say('34600000002', 'sí', 'confirm_yes'));
-    assert.match(body, /Mesa confirmada/);
+    assert.match(body, /solicitud nº 1/i);
+    assert.match(body, /pendiente de confirmación/);
+    assert.doesNotMatch(body, /Mesa confirmada|queda \*confirmada\*/);
     assert.equal(reservations.length, 1);
     assert.equal(reservations[0].type, 'restaurante');
-    assert.equal(reservations[0].status, undefined);
+    assert.equal(reservations[0].status, 'pending');
     assert.equal(reservations[0].partySize, 4);
     assert.equal(reservations[0].time, '14:00');
+    const admin = sent.filter((message) => message.to === '34699999999');
+    assert.equal(admin.length, 1);
+    assert.match(admin[0].body, /OK 1/);
+    assert.match(admin[0].body, /NO 1/);
+    assert.match(admin[0].body, /14:00/);
+    assert.match(admin[0].body, /Ana Ruiz/);
   });
 
   it('el hotel sigue pidiendo la fecha de entrada', async () => {
@@ -1131,13 +1201,16 @@ describe('menús oficiales de Navidad, Nochevieja y Año Nuevo', () => {
     assert.equal(sent.filter((message) => message.to === '34699999999').length, 0);
 
     messages = await say(phone, 'sí', 'confirm_yes');
-    assert.match(joined(messages), /Reserva confirmada/);
+    assert.match(joined(messages), /pendiente de confirmación/);
+    assert.match(joined(messages), /solicitud nº 1/i);
+    assert.doesNotMatch(joined(messages), /queda \*confirmada\*/);
     assert.match(joined(messages), /Menú Nochevieja/);
     assert.match(joined(messages), /31 de diciembre de 2026/);
     assert.doesNotMatch(joined(messages), PERSONAL);
     assert.equal(reservations.length, 1);
     const saved = reservations[0];
     assert.equal(saved.type, 'restaurante');
+    assert.equal(saved.status, 'pending');
     assert.equal(saved.date, '2026-12-31');
     assert.equal(saved.partySize, 4);
     assert.equal(saved.name, 'Ana Ruiz');
@@ -1149,7 +1222,9 @@ describe('menús oficiales de Navidad, Nochevieja y Año Nuevo', () => {
 
     const admin = sent.filter((message) => message.to === '34699999999');
     assert.equal(admin.length, 1);
-    assert.match(admin[0].body, /RESTAURANTE — reserva #1/);
+    assert.match(admin[0].body, /RESTAURANTE — solicitud #1/);
+    assert.match(admin[0].body, /OK 1/);
+    assert.match(admin[0].body, /NO 1/);
     assert.match(admin[0].body, /Menú Nochevieja/);
     assert.match(admin[0].body, /110 € por persona/);
     assert.match(admin[0].body, /Ana Ruiz/);
@@ -1172,5 +1247,185 @@ describe('menús oficiales de Navidad, Nochevieja y Año Nuevo', () => {
     } finally {
       console.error = original;
     }
+  });
+});
+
+describe('confirmación de Nico', () => {
+  const ADMIN = '34699999999';
+  const ADDRESS = 'Ctra. Salamanca–Alba de Tormes km 17';
+  const PERSONAL = /650\s*488\s*113|661\s*724\s*158|650488113|661724158|34650488113|34661724158/;
+
+  function seed(overrides = {}) {
+    const id = reservations.length + 1;
+    const row = {
+      id,
+      phone: '34600000999',
+      name: 'Ana Ruiz',
+      partySize: 4,
+      party_size: 4,
+      date: '2026-12-31',
+      time: 'menú',
+      type: 'restaurante',
+      status: 'pending',
+      details: 'Menú Nochevieja · 110 € por persona',
+      customer_notice: null,
+      reject_reason: null,
+      decided_at: null,
+      ...overrides,
+    };
+    if (overrides.partySize != null && overrides.party_size == null) row.party_size = overrides.partySize;
+    reservations.push(row);
+    return row;
+  }
+
+  function toCustomer(phone) {
+    return sent.filter((message) => message.to === phone);
+  }
+
+  it('el WhatsApp de administración no entra en el flujo del cliente', async () => {
+    let messages = await say(ADMIN, 'quiero una mesa');
+    assert.match(joined(messages), /OK 123/);
+    assert.match(joined(messages), /NO 123/);
+    assert.doesNotMatch(joined(messages), /qué día/i);
+    assert.equal(sessions.has(ADMIN), false);
+    assert.equal(reservations.length, 0);
+
+    messages = await say('+34 699 999 999', 'hola');
+    assert.match(joined(messages), /administración/);
+    assert.equal(messages.some((message) => message.kind === 'buttons'), false);
+  });
+
+  it('OK con el código confirma y avisa al cliente dentro de las 24 h', async () => {
+    const phone = '34600000999';
+    seed();
+    inboundAt.set(phone, new Date().toISOString());
+    const admin = await say(ADMIN, 'OK 1');
+    assert.match(joined(admin), /Solicitud #1 confirmada/);
+    assert.match(joined(admin), /He avisado a Ana Ruiz/);
+    const customer = toCustomer(phone);
+    assert.equal(customer.length, 1);
+    const body = customer[0].body;
+    assert.match(body, /queda \*confirmada\*/);
+    assert.match(body, /Menú Nochevieja/);
+    assert.match(body, /110 € por persona/);
+    assert.match(body, /31 de diciembre de 2026/);
+    assert.match(body, /4 personas/);
+    assert.match(body, /Ana Ruiz/);
+    assert.ok(body.includes(ADDRESS));
+    assert.match(body, /923 37 00 76/);
+    assert.match(body, /reservas@donfadrique\.com/);
+    assert.doesNotMatch(body, new RegExp(phone));
+    assert.doesNotMatch(body, PERSONAL);
+    assert.equal(reservations[0].status, 'confirmed');
+    assert.equal(reservations[0].customer_notice, 'sent');
+    assert.equal(sent.filter((message) => message.kind === 'template').length, 0);
+
+    const again = await say(ADMIN, 'OK 1');
+    assert.match(joined(again), /ya está confirmada/);
+    assert.equal(toCustomer(phone).length, 1);
+  });
+
+  it('OK a secas confirma la única pendiente y NO lleva el motivo', async () => {
+    const phone = '34600000991';
+    seed({ phone, name: 'Luis' });
+    inboundAt.set(phone, new Date().toISOString());
+    let admin = await say(ADMIN, 'ok');
+    assert.match(joined(admin), /confirmada/);
+    assert.equal(reservations[0].status, 'confirmed');
+
+    seed({ phone: '34600000992', name: 'Marta' });
+    seed({ phone: '34600000993', name: 'Pedro' });
+    const before = reservations.filter((row) => row.status === 'pending').length;
+    admin = await say(ADMIN, 'OK');
+    assert.match(joined(admin), /Hay 2 solicitudes pendientes/);
+    assert.match(joined(admin), /#2/);
+    assert.match(joined(admin), /#3/);
+    assert.equal(reservations.filter((row) => row.status === 'pending').length, before);
+
+    admin = await say(ADMIN, 'NO 3 no hay hueco esa noche');
+    assert.match(joined(admin), /rechazada/);
+    assert.match(joined(admin), /He avisado a Pedro/);
+    const customer = toCustomer('34600000993').at(-1).body;
+    assert.match(customer, /sentimos no poder aceptar/);
+    assert.match(customer, /no hay hueco esa noche/);
+    assert.match(customer, /923 37 00 76/);
+    assert.match(customer, /reservas@donfadrique\.com/);
+    assert.match(customer, /otra fecha/);
+    assert.doesNotMatch(customer, /34600000993/);
+    assert.doesNotMatch(customer, PERSONAL);
+    assert.equal(reservations[2].status, 'rejected');
+    assert.equal(reservations[1].status, 'pending');
+  });
+
+  it('fuera de 24 h no manda plantilla y lo cuenta cuando el cliente vuelve a escribir', async () => {
+    const phone = '34600000994';
+    seed({ phone, name: 'Nuria' });
+    inboundAt.set(phone, new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString());
+    const templatesBefore = sent.filter((message) => message.kind === 'template').length;
+    const admin = await say(ADMIN, 'OK 1');
+    assert.match(joined(admin), /no le he escrito por WhatsApp/);
+    assert.match(joined(admin), /24 h/);
+    assert.match(joined(admin), /plantillas de pago/);
+    assert.match(joined(admin), /otro medio/);
+    assert.match(joined(admin), /vuelva a escribir/);
+    assert.equal(toCustomer(phone).length, 0);
+    assert.equal(reservations[0].status, 'confirmed');
+    assert.equal(reservations[0].customer_notice, 'deferred');
+    assert.equal(sent.filter((message) => message.kind === 'template').length, templatesBefore);
+
+    const later = await say(phone, 'hola');
+    assert.match(joined(later), /queda \*confirmada\*/);
+    assert.ok(joined(later).includes(ADDRESS));
+    assert.equal(later.at(-1).kind, 'buttons');
+    assert.equal(reservations[0].customer_notice, 'sent');
+
+    const again = await say(phone, 'hola');
+    assert.doesNotMatch(joined(again), /queda \*confirmada\*/);
+  });
+
+  it('si Meta rechaza el mensaje de sesión, tampoco usa plantilla', async () => {
+    const phone = '34600000995';
+    seed({ phone });
+    inboundAt.set(phone, new Date().toISOString());
+    failWindowFor = phone;
+    const admin = await say(ADMIN, 'OK #1');
+    assert.match(joined(admin), /plantillas de pago/);
+    assert.equal(toCustomer(phone).length, 0);
+    assert.equal(reservations[0].customer_notice, 'deferred');
+    assert.equal(sent.filter((message) => message.kind === 'template' && message.to === phone).length, 0);
+  });
+
+  it('confirmar una habitación actualiza el PMS y rechazarla la libera', async () => {
+    seed({
+      phone: '34600000996',
+      name: 'Clara',
+      type: 'hotel',
+      time: '--:--',
+      date: '2026-11-15',
+      partySize: 2,
+      party_size: 2,
+      details: 'Entrada 2026-11-15, Salida 2026-11-17, 2 noche(s), 2 pers. | Hab 4 | 180 EUR | PMS 55',
+    });
+    inboundAt.set('34600000996', new Date().toISOString());
+    await say(ADMIN, 'confirmar 1');
+    assert.deepEqual(hotelCalls, [{ action: 'confirm', id: '55' }]);
+    assert.match(toCustomer('34600000996')[0].body, /Habitación/);
+    assert.match(toCustomer('34600000996')[0].body, /15 de noviembre de 2026/);
+    assert.match(toCustomer('34600000996')[0].body, /17 de noviembre de 2026/);
+    assert.doesNotMatch(toCustomer('34600000996')[0].body, /PMS|34600000996/);
+
+    seed({
+      phone: '34600000997',
+      name: 'Diego',
+      type: 'hotel',
+      details: 'Entrada 2026-12-01, Salida 2026-12-03, 2 noche(s) | PMS 77',
+    });
+    inboundAt.set('34600000997', new Date().toISOString());
+    await say(ADMIN, 'NO 2 llama al 34611222333');
+    assert.deepEqual(hotelCalls.at(-1), { action: 'delete', id: '77' });
+    const body = toCustomer('34600000997')[0].body;
+    assert.match(body, /sentimos no poder aceptar/);
+    assert.doesNotMatch(body, /34611222333|34600000997/);
+    assert.match(body, /otra fecha/);
   });
 });

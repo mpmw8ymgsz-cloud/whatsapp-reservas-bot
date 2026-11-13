@@ -82,6 +82,10 @@ const ready = (async () => {
   try { await execute(`ALTER TABLE reservations ADD COLUMN type TEXT DEFAULT 'restaurante'`); } catch (e) {}
   try { await execute(`ALTER TABLE reservations ADD COLUMN details TEXT`); } catch (e) {}
   try { await execute(`ALTER TABLE reservations ADD COLUMN admin_alert TEXT`); } catch (e) {}
+  try { await execute(`ALTER TABLE reservations ADD COLUMN customer_notice TEXT`); } catch (e) {}
+  try { await execute(`ALTER TABLE reservations ADD COLUMN reject_reason TEXT`); } catch (e) {}
+  try { await execute(`ALTER TABLE reservations ADD COLUMN decided_at TEXT`); } catch (e) {}
+  try { await execute(`ALTER TABLE customers ADD COLUMN last_inbound_at TEXT`); } catch (e) {}
   await execute(`CREATE TABLE IF NOT EXISTS marketing_optouts (
     phone TEXT PRIMARY KEY,
     reason TEXT,
@@ -131,7 +135,8 @@ module.exports = {
   async countReservations(date, time, type) {
     await ready;
     const result = await execute(
-      `SELECT COUNT(*) as c FROM reservations WHERE date = ? AND time = ? AND type = ? AND status = 'confirmed'`,
+      `SELECT COUNT(*) as c FROM reservations
+       WHERE date = ? AND time = ? AND type = ? AND status IN ('confirmed', 'pending')`,
       [date, time, type]
     );
     return Number(rowsToObjects(result)[0].c);
@@ -160,13 +165,11 @@ module.exports = {
   async getUpcomingReservations(phone) {
     await ready;
     const today = new Date().toISOString().slice(0, 10);
-    const typeSlots = PENDING_EVENT_TYPES.map(() => '?').join(', ');
     const result = await execute(
       `SELECT * FROM reservations
-       WHERE phone = ? AND date >= ?
-         AND (status = 'confirmed' OR (status = 'pending' AND type IN (${typeSlots})))
+       WHERE phone = ? AND date >= ? AND status IN ('confirmed', 'pending')
        ORDER BY date, time`,
-      [phone, today, ...PENDING_EVENT_TYPES]
+      [phone, today]
     );
     return rowsToObjects(result);
   },
@@ -181,6 +184,76 @@ module.exports = {
       PENDING_EVENT_TYPES
     );
     return rowsToObjects(result);
+  },
+
+  async listRejectedReservations() {
+    await ready;
+    const result = await execute(
+      `SELECT * FROM reservations WHERE status = 'rejected' ORDER BY id DESC LIMIT 30`
+    );
+    return rowsToObjects(result);
+  },
+
+  async listPendingReservations() {
+    await ready;
+    const result = await execute(
+      `SELECT * FROM reservations WHERE status = 'pending' ORDER BY date, time, id`
+    );
+    return rowsToObjects(result);
+  },
+
+  async getReservation(id) {
+    await ready;
+    const result = await execute('SELECT * FROM reservations WHERE id = ?', [id]);
+    return rowsToObjects(result)[0] || null;
+  },
+
+  async updateReservationDecision(id, { status, reason, customerNotice }) {
+    await ready;
+    const result = await execute(
+      `UPDATE reservations
+       SET status = ?, reject_reason = ?, customer_notice = ?, decided_at = ?
+       WHERE id = ? AND status = 'pending'`,
+      [status, reason || null, customerNotice || null, new Date().toISOString(), id]
+    );
+    return result.affected_row_count > 0;
+  },
+
+  async setCustomerNotice(id, notice) {
+    await ready;
+    await execute('UPDATE reservations SET customer_notice = ? WHERE id = ?', [notice, id]);
+  },
+
+  async listDeferredNotices(phone) {
+    await ready;
+    const result = await execute(
+      `SELECT * FROM reservations
+       WHERE phone = ? AND status IN ('confirmed', 'rejected')
+         AND (customer_notice = 'deferred' OR (customer_notice IS NULL AND decided_at IS NOT NULL))
+       ORDER BY id`,
+      [phone]
+    );
+    return rowsToObjects(result);
+  },
+
+  async touchLastInbound(phone, atIso) {
+    await ready;
+    const at = atIso || new Date().toISOString();
+    await execute(
+      `INSERT INTO customers (phone, name, updated_at, last_inbound_at)
+       VALUES (?, NULL, ?, ?)
+       ON CONFLICT(phone) DO UPDATE SET
+         last_inbound_at = excluded.last_inbound_at,
+         updated_at = excluded.updated_at`,
+      [phone, at, at]
+    );
+  },
+
+  async getLastInbound(phone) {
+    await ready;
+    const result = await execute('SELECT last_inbound_at FROM customers WHERE phone = ?', [phone]);
+    const rows = rowsToObjects(result);
+    return rows[0] ? rows[0].last_inbound_at : null;
   },
 
   async getReservationById(id, phone) {

@@ -162,6 +162,14 @@ describe('estados de entrega de Meta', { concurrency: 1 }, () => {
     await db.ready;
   });
 
+  it('prepara la confirmación del cliente y su última entrada', () => {
+    const sql = pipelineCalls.map((call) => call.sql).join('\n');
+    assert.match(sql, /ADD COLUMN customer_notice/);
+    assert.match(sql, /ADD COLUMN reject_reason/);
+    assert.match(sql, /ADD COLUMN decided_at/);
+    assert.match(sql, /ADD COLUMN last_inbound_at/);
+  });
+
   it('crea message_status al arrancar Turso', () => {
     const create = pipelineCalls.find((call) => /CREATE TABLE IF NOT EXISTS message_status/i.test(call.sql));
     assert.ok(create, 'falta CREATE TABLE message_status');
