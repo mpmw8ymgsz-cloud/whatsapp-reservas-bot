@@ -150,6 +150,16 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
     return sendPhotoTour(from, 'fotos', session);
   }
 
+  if (
+    session.step === STEP.GRUPO &&
+    session.data &&
+    session.data.flow === 'boda' &&
+    !buttonId &&
+    fotos.isMoreWeddingPhotos(normText)
+  ) {
+    return sendMoreWeddingPhotos(from, session);
+  }
+
   const askingPhotos = !buttonId && fotos.matchPhotoRequest(normText);
   const ceremonyReply =
     session.step === STEP.GRUPO &&
@@ -277,7 +287,8 @@ async function sendInfo(from) {
       `🍽️ *Restaurante*: comidas 13:30-15:30 y cenas 20:30-22:30. Cerrado martes y miércoles.\n\n` +
       `🛏️ *Hotel*: reserva online en ${B.hotelBookingUrl} o escríbeme aquí y aviso a recepción.\n\n` +
       `🎉 *Eventos*: bodas en exclusiva, congresos y grupos grandes (capacidad total de 500 a 700; terraza acristalada de 10 a 50). ` +
-      `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. Escribe *boda*, *eventos* o *congreso*.\n\n` +
+      `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. ` +
+      `Para una boda, escribid «Quiero información para mi boda». También vale *eventos* o *congreso*.\n\n` +
       `Escribe *ver fotos* para ver la casa, o *menu* para volver al inicio.`
   );
 }
@@ -982,6 +993,14 @@ async function sendHolidayMenus(from, which, session) {
     return;
   }
   await db.clearSession(from);
+}
+
+async function sendMoreWeddingPhotos(from, session) {
+  await deliverPhotos(from, fotos.moreWeddingReplies());
+  await sendReplies(from, [
+    { kind: 'text', body: 'Aquí van más fotos de bodas en la casa.' },
+    ...grupos.promptReplies(session.data, B),
+  ]);
 }
 
 async function sendPhotoTour(from, norm, session) {

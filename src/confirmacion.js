@@ -166,6 +166,15 @@ function peopleLine(row) {
   return `${n} ${noun}`;
 }
 
+function visitSummary(details) {
+  const parts = String(details || '').split('|').map((part) => part.trim());
+  const hit = parts.find((part) => part.toLowerCase().startsWith('visita:'));
+  if (!hit) return '';
+  const value = hit.slice(hit.indexOf(':') + 1).trim();
+  if (!value || /^(no|aún no|aun no)$/i.test(value)) return '';
+  return `Visita: ${value}`;
+}
+
 function summaryLines(row) {
   const lines = [...kindLines(row)];
   const company = detailField(row.details, 'Empresa');
@@ -173,6 +182,8 @@ function summaryLines(row) {
   lines.push(...whenLines(row));
   const people = peopleLine(row);
   if (people) lines.push(people);
+  const visit = visitSummary(row.details);
+  if (visit) lines.push(visit);
   if (row.name) lines.push(String(row.name).trim());
   return lines.filter(Boolean);
 }
@@ -201,14 +212,12 @@ function customerPending({ id, businessName: name, lines }) {
 
 function customerConfirmed(row) {
   const hello = row.name ? `¡Hola ${String(row.name).trim()}!` : '¡Hola!';
-  const text = [
-    `${hello} Tu reserva en ${businessName()} queda *confirmada*. 🎉`,
-    '',
-    `Solicitud nº ${row.id}`,
-    ...summaryLines(row),
-    '',
-    contactBlock(),
-  ].join('\n');
+  const visit = row.type === 'evento_boda' ? visitSummary(row.details) : '';
+  const headline = visit
+    ? `${hello} Queda *confirmada* la visita para ver ${businessName()}. 🎉`
+    : `${hello} Tu reserva en ${businessName()} queda *confirmada*. 🎉`;
+  const tail = visit ? ['', 'La fecha de la boda sigue pendiente del presupuesto a medida.'] : [];
+  const text = [headline, '', `Solicitud nº ${row.id}`, ...summaryLines(row), ...tail, '', contactBlock()].join('\n');
   return scrubCustomerPhone(text, row.phone);
 }
 

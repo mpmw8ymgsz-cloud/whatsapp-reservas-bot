@@ -30,40 +30,68 @@ function placeholdersText() {
   return PLACEHOLDERS.map((p) => `• ${p.label}: [PENDIENTE] ${p.note}`).join('\n');
 }
 
+// Texto público para enlaces wa.me. Abre el flujo de boda y no otro.
+const WEDDING_TRIGGER = 'Quiero información para mi boda';
+
 function bodaIntro(businessName) {
   return (
     `💍 *Bodas en ${businessName}*\n\n` +
-    `La hostería puede reservarse en exclusiva para una boda o un evento. ` +
-    `Hay jardines y terraza acristalada, y la ceremonia puede celebrarse en el jardín. ` +
-    `El restaurante está recomendado en la Guía Michelin y tiene 1 Sol Repsol. ` +
-    `Contamos con ${HABITACIONES} para los invitados, y el menú se prepara a medida.\n\n` +
-    `Los espacios, juntos, admiten ${CAPACIDAD_TOTAL}.\n\n` +
-    `El traslado o el autobús de los invitados se consulta caso por caso, según el grupo y la fecha.\n\n` +
-    `Tomo los datos y el equipo envía el presupuesto. La fecha no queda reservada hasta entonces.`
+    `La hostería se reserva en exclusiva para la boda. El restaurante está recomendado en la Guía Michelin y tiene 1 Sol Repsol desde 2015. Hay ${HABITACIONES} para los invitados.\n\n` +
+    `Bodega con más de 400 referencias, huerta propia y piscina de temporada. Se admiten mascotas. Los eventos grandes son una especialidad de la casa.\n\n` +
+    `El menú y el precio van en un presupuesto a medida. El traslado del grupo se consulta según el tamaño y la fecha. La fecha no queda reservada hasta entonces.\n\n` +
+    `Os mando unas fotos de bodas en la casa. Si queréis más, escribid *más fotos*.`
   );
 }
 
 function bodaSideAnswer(norm) {
-  if (
-    /vino|bebida|barra libre|cava|copas?|precio|cuanto cuesta|tarifa|\biva\b|plato|menu|carta|incluye|cuesta/.test(
-      norm
-    )
-  ) {
-    return (
-      'El menú de la boda es a medida. Los platos, la bebida y el precio los propone el equipo en el presupuesto; por aquí no cierro una tarifa.'
-    );
+  if (!norm) return null;
+  if (/wedding planner|weddingplanner|organizador|proveedor|florista|dj propio|nuestro dj|nuestra dj/.test(norm)) {
+    return 'Los proveedores y el wedding planner propios se consultan caso por caso.';
   }
-  if (/jardin|ceremonia/.test(norm)) {
-    return 'La ceremonia puede celebrarse en el jardín. El uso de los jardines y de la terraza acristalada se concreta en el presupuesto.';
+  if (/menu infantil|\binfantil\b|\bninos\b|\bpeques\b|menu de ninos/.test(norm)) {
+    return 'El menú infantil se adapta a petición, dentro del presupuesto a medida. Por aquí no cierro una carta ni un precio.';
+  }
+  if (/gluten|vegetar|celiac|vegano|alergi|sin lactosa|intoleran/.test(norm)) {
+    return 'Sí. El menú se adapta a petición: gluten, vegetariano y otras necesidades. Lo deja el equipo en el presupuesto.';
+  }
+  if (/dj\b|musica|orquesta|violin|de madrugada|hasta tarde|hasta muy tarde|barra libre/.test(norm)) {
+    return 'La música y el horario de la fiesta se consultan caso por caso. Lo anoto para el presupuesto.';
+  }
+  if (/mascota|\bperro\b|\bperros\b|\bgato\b|\bgatos\b/.test(norm)) {
+    return 'Se admiten mascotas.';
+  }
+  if (/piscina/.test(norm)) {
+    return 'Hay piscina de temporada.';
+  }
+  if (/bodega|\bvinos?\b|referencias/.test(norm)) {
+    return 'La bodega tiene más de 400 referencias. El vino de la boda va en el presupuesto a medida.';
+  }
+  if (/huerta|\bhuerto\b/.test(norm)) {
+    return 'La casa tiene huerta propia.';
+  }
+  if (/evento grande|macroevento|especialidad/.test(norm)) {
+    return 'Los eventos grandes son una especialidad de la casa. El espacio se concreta en el presupuesto.';
   }
   if (/michelin|repsol/.test(norm)) {
-    return 'El restaurante está recomendado en la Guía Michelin y tiene 1 Sol Repsol.';
+    return 'El restaurante está recomendado en la Guía Michelin y tiene 1 Sol Repsol desde 2015.';
   }
-  if (/exclusiv/.test(norm)) {
-    return 'La hostería puede reservarse en exclusiva para la boda o el evento.';
+  if (/habitacion|alojamiento|dormir|pernoct/.test(norm)) {
+    return `Hay ${HABITACIONES} para los invitados. Si las queréis, lo anoto en la solicitud.`;
   }
-  if (/dj\b|musica|orquesta|violin/.test(norm)) {
-    return 'La música se anota en la solicitud. El equipo confirma en el presupuesto si entra y cómo se cobra.';
+  if (/exclusiv|privatiz/.test(norm)) {
+    return 'La hostería se puede reservar en exclusiva para la boda.';
+  }
+  if (/jardin|ceremonia/.test(norm)) {
+    return 'La ceremonia puede hacerse en la hostería, o solo el banquete. Lo concretamos en el presupuesto.';
+  }
+  if (/autobus|autocar|traslado|transporte|\bbus\b/.test(norm)) {
+    return 'El traslado o el autobús del grupo se consulta según el tamaño y la fecha.';
+  }
+  if (/telefono|llamar|correo|\bemail\b|contacto/.test(norm)) {
+    return 'El teléfono es el 923 37 00 76 y el correo reservas@donfadrique.com.';
+  }
+  if (/bebida|precio|cuanto cuesta|tarifa|\biva\b|plato|\bmenu\b|\bcarta\b|incluye|cuesta/.test(norm)) {
+    return 'El menú y el precio son un presupuesto a medida. Por aquí no cierro platos ni una tarifa.';
   }
   return null;
 }
@@ -131,11 +159,27 @@ function answerSideQuestion(norm, flow) {
   return null;
 }
 
+function blocksWedding(norm) {
+  if (/\bboda|preboda|postboda|casar|enlace|pedida|ceremonia civil/.test(norm)) return false;
+  if (/\bnavidad\b|\bnochebuena\b|\bnochevieja\b|\bnoche vieja\b|\bano nuevo\b/.test(norm)) return true;
+  if (/\b(comida|almuerzo|cena)s?\s+(de\s+)?(la\s+|una\s+)?empresa\b/.test(norm)) return true;
+  if (/\bhabitaciones?\b|\bhotel\b|\bdormir\b|\balojamiento\b/.test(norm)) return true;
+  if (/\bmesas?\b/.test(norm)) return true;
+  return false;
+}
+
 function isBodaTopic(norm) {
   if (!norm) return false;
+  if (blocksWedding(norm)) return false;
+  if (norm === 'quiero informacion para mi boda' || norm.includes('quiero informacion para mi boda')) return true;
   if (/\bbodas?\b/.test(norm)) return true;
+  if (/\bprebodas?\b|\bpostbodas?\b/.test(norm)) return true;
+  if (/\baniversario de boda\b/.test(norm)) return true;
+  if (/\bpedida\b/.test(norm)) return true;
+  if (/\bceremonia civil\b/.test(norm)) return true;
   if (/\benlace\b/.test(norm)) return true;
   if (/\bcasamiento\b|\bcasamos\b|\bcasar(me|te|se|nos|os)?\b/.test(norm)) return true;
+  if (/\bbanquete de boda\b/.test(norm)) return true;
   return false;
 }
 
@@ -180,6 +224,7 @@ module.exports = {
   MAX_AFORO,
   PLACEHOLDERS,
   placeholdersText,
+  WEDDING_TRIGGER,
   bodaIntro,
   congresoIntro,
   answerSideQuestion,
