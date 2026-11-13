@@ -109,6 +109,10 @@ describe('archivos publicados', () => {
       );
       process.env.PUBLIC_BASE_URL = 'https://example.com/';
       assert.equal(fotos.publicUrl('ceremonia-jardin.jpg'), 'https://example.com/fotos/ceremonia-jardin.jpg');
+      assert.equal(
+        fotos.publicUrl('menu-navidad-25dic.jpg', 'menus'),
+        'https://example.com/menus/menu-navidad-25dic.jpg'
+      );
     } finally {
       if (previous === undefined) delete process.env.PUBLIC_BASE_URL;
       else process.env.PUBLIC_BASE_URL = previous;

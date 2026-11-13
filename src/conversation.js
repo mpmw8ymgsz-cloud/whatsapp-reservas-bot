@@ -8,6 +8,7 @@ const grupos = require('./grupos');
 const faq = require('./faqLlegada');
 const marketing = require('./marketing');
 const fotos = require('./fotos');
+const menusFiesta = require('./menusFiesta');
 
 const B = config.business;
 
@@ -88,6 +89,17 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
       await wa.sendText(from, imageAck(session));
       if (!session.step || session.step === STEP.IDLE) return showMenu(from);
       return;
+    }
+  }
+
+  if (!buttonId && !collectingTable(session)) {
+    const reserveId = menusFiesta.matchReservation(normText);
+    if (reserveId && holidayMenusNow(session, normText, reserveId)) {
+      return startMenuReservation(from, reserveId);
+    }
+    const which = menusFiesta.matchRequest(normText);
+    if (which && holidayMenusNow(session, normText, which)) {
+      return sendHolidayMenus(from, which, session);
     }
   }
 
@@ -529,6 +541,16 @@ async function goToConfirm(from, session) {
   await db.setSession(from, STEP.CONFIRM, session.data);
   const d = session.data;
 
+  if (d.menuId) {
+    const resumen =
+      `Confirma tu reserva del *${d.menuTitle}*:\n📅 ${d.dateLabel}\n💶 ${d.menuPrice}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Confirmo?`;
+    await wa.sendButtons(from, resumen, [
+      { id: 'confirm_yes', title: '✅ Confirmar' },
+      { id: 'confirm_no', title: '❌ Cancelar' },
+    ]);
+    return;
+  }
+
   const resumen = `Confirma tu reserva en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Confirmo?`;
 
   await wa.sendButtons(from, resumen, [
@@ -545,6 +567,7 @@ async function handleConfirmStep(from, buttonId, session, text) {
   if (isYes) {
     const d = session.data;
     if (d.type === 'otivm') return otivmCerrado(from);
+    if (d.menuId) return confirmMenuReservation(from, session);
 
     const photoNote = fotos.clientPhotoNote(d);
     const id = await db.createReservation({
@@ -792,7 +815,7 @@ async function sendImageSafe(from, photo) {
     if (typeof wa.sendImage !== 'function') throw new Error('este proveedor no envía imágenes');
     const payload = { caption: photo.caption || photo.body || '' };
     if (photo.id) payload.id = photo.id;
-    else payload.link = photo.link || fotos.publicUrl(photo.file);
+    else payload.link = photo.link || fotos.publicUrl(photo.file, photo.folder || 'fotos');
     await wa.sendImage(from, payload);
   } catch (err) {
     console.error(`[fotos] no se pudo enviar ${label}: ${formatSendError(err)}`);
@@ -801,6 +824,86 @@ async function sendImageSafe(from, photo) {
 
 async function deliverPhotos(from, photos) {
   for (const photo of photos) await sendImageSafe(from, photo);
+}
+
+function collectingTable(session) {
+  return [
+    STEP.DATE,
+    STEP.TIME,
+    STEP.PARTY,
+    STEP.NAME,
+    STEP.CONFIRM,
+    STEP.HOTEL_ENTRADA,
+    STEP.HOTEL_SALIDA,
+    STEP.HOTEL_PAX,
+    STEP.HOTEL_QUOTE,
+    STEP.CANCEL_SELECT,
+  ].includes(session && session.step);
+}
+
+async function startMenuReservation(from, which) {
+  const menu = menusFiesta.BY_ID[which];
+  const cfg = expConfig('restaurante');
+  await db.setSession(from, STEP.PARTY, {
+    type: 'restaurante',
+    menuId: which,
+    date: menu.isoDate,
+    dateLabel: menu.date,
+    time: 'menú',
+    menuTitle: menu.title,
+    menuPrice: menu.price,
+  });
+  await sendReplies(from, [
+    ...menusFiesta.reservationReplies(which),
+    { kind: 'text', body: `¿Para cuántas personas? (máx. ${cfg.maxPartySize})` },
+  ]);
+}
+
+async function confirmMenuReservation(from, session) {
+  const d = session.data;
+  const photoNote = fotos.clientPhotoNote(d);
+  const details = `${d.menuTitle} · ${d.menuPrice}` + (photoNote ? ` | ${photoNote}` : '');
+  const id = await db.createReservation({
+    phone: from,
+    name: d.name,
+    partySize: d.partySize,
+    date: d.date,
+    time: d.time,
+    type: 'restaurante',
+    details,
+  });
+  await db.clearSession(from);
+  await wa.sendText(
+    from,
+    `¡Reserva confirmada! 🍽️🎉 (nº ${id})\n*${d.menuTitle}*\n📅 ${d.dateLabel}\n💶 ${d.menuPrice}\n👥 ${d.partySize} personas\n\n` +
+      `Te esperamos en ${B.name}.\n📍 ${B.address}\n\n_Para cancelar, escribe "mis reservas"._`
+  );
+  if (config.adminPhone) {
+    await wa.sendText(
+      config.adminPhone,
+      `🍽️ RESTAURANTE — reserva #${id}\n${d.menuTitle}\n${d.dateLabel}\n${d.menuPrice}\n${d.partySize} personas\nNombre: ${d.name}\nTel: ${from}` +
+        (photoNote ? `\n${photoNote}` : '')
+    );
+  }
+}
+
+function holidayMenusNow(session, norm, which) {
+  if (!session || session.step !== STEP.GRUPO) return true;
+  const flow = session.data && session.data.flow;
+  if (flow === 'boda' || flow === 'congreso') {
+    return /\b(?:menu|menus|carta)\b/.test(norm) && /navidad|nochevieja|ano nuevo/.test(norm);
+  }
+  return true;
+}
+
+async function sendHolidayMenus(from, which, session) {
+  const inFlow = !!(session && session.step && session.step !== STEP.IDLE);
+  await sendReplies(from, menusFiesta.replies(which, { followUp: !inFlow }));
+  if (inFlow) {
+    await wa.sendText(from, 'Cuando quieras seguimos con lo que estábamos apuntando.');
+    return;
+  }
+  await db.clearSession(from);
 }
 
 async function sendPhotoTour(from, norm, session) {

@@ -60,6 +60,11 @@ const CATALOG = {
     caption: 'Un plato del restaurante.',
     source: 'https://www.donfadrique.com/wp-content/uploads/5-4-1500x630.jpg',
   },
+  cochinillo: {
+    file: 'cochinillo.jpg',
+    caption: 'Cochinillo de la casa.',
+    source: 'https://www.donfadrique.com/wp-content/uploads/COCHINILLO-AHUMADO-CARRASCAL-705x705.jpg',
+  },
   terrazaDia: {
     file: 'terraza-dia.jpg',
     caption: 'Terraza acristalada de día.',
@@ -166,8 +171,9 @@ function publicBaseUrl() {
   return (fromEnv || DEFAULT_PUBLIC_BASE_URL).replace(/\/+$/, '');
 }
 
-function publicUrl(file) {
-  return `${publicBaseUrl()}/fotos/${file}`;
+function publicUrl(file, folder = 'fotos') {
+  const dir = String(folder || 'fotos').replace(/^\/+|\/+$/g, '') || 'fotos';
+  return `${publicBaseUrl()}/${dir}/${file}`;
 }
 
 function clientPhotoNote(data) {
