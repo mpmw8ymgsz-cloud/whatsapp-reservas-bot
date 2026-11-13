@@ -76,11 +76,19 @@ describe('álbumes', () => {
     }
   });
 
-  it('la presentación de boda y de congreso manda 1 o 2 fotos', () => {
-    for (const flow of ['boda', 'congreso']) {
-      const photos = fotos.presentationReplies(flow);
-      assert.ok(photos.length >= 1 && photos.length <= 2, flow);
+  it('la presentación de boda manda 2 o 3 fotos y la de congreso 1 o 2', () => {
+    const boda = fotos.presentationReplies('boda');
+    assert.ok(boda.length >= 2 && boda.length <= 3, 'boda');
+    const more = fotos.moreWeddingReplies();
+    assert.ok(more.length >= 2 && more.length <= 3, 'más fotos');
+    const files = new Set([...boda, ...more].map((photo) => photo.file));
+    assert.equal(files.size, boda.length + more.length);
+    for (const photo of [...boda, ...more]) {
+      assert.match(photo.source, /^https:\/\/www\.donfadrique\.com\/wp-content\/uploads\/.+\.jpg$/);
+      assert.match(photo.caption, /[a-záéíóúñ]/i);
     }
+    const congreso = fotos.presentationReplies('congreso');
+    assert.ok(congreso.length >= 1 && congreso.length <= 2, 'congreso');
   });
 });
 

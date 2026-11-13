@@ -491,33 +491,42 @@ describe('conversación', () => {
 describe('bodas, empresa y avisos', () => {
   function assertBodaIntro(body) {
     assert.match(body, /exclusiv/);
-    assert.match(body, /[Jj]ardines/);
-    assert.match(body, /terraza acristalada/);
-    assert.match(body, /ceremonia puede celebrarse en el jardín/);
     assert.match(body, /Guía Michelin/);
-    assert.match(body, /1 Sol Repsol/);
+    assert.match(body, /1 Sol Repsol desde 2015/);
     assert.match(body, /21 habitaciones dobles/);
-    assert.match(body, /a medida/);
-    assert.match(body, /500 a 700/);
-    assert.match(body, /caso por caso/);
+    assert.match(body, /400 referencias/);
+    assert.match(body, /huerta propia/);
+    assert.match(body, /piscina de temporada/);
+    assert.match(body, /mascotas/);
+    assert.match(body, /eventos grandes/);
+    assert.match(body, /presupuesto a medida/);
+    assert.match(body, /según el tamaño y la fecha/);
     assert.match(body, /no queda reservada/);
+    assert.match(body, /más fotos/);
+    assert.match(body, /Ceremonia en el jardín/);
     assert.doesNotMatch(body, /\d+\s*€/);
     assert.doesNotMatch(body, /siempre|nunca/i);
+    assert.doesNotMatch(body, /500 a 700/);
     assert.doesNotMatch(body, /quieres la mesa|Restaurante Don Fadrique/);
   }
 
   async function completarBoda(phone) {
     await say(phone, 'quiero una boda');
-    await say(phone, 'Ana y Luis');
     await say(phone, '12/06/2027');
     await say(phone, 'unas 120');
     await say(phone, 'sí', 'boda_si');
-    const review = joined(await say(phone, 'habitaciones y autobús para los invitados'));
-    assert.match(review, /email|teléfono|WhatsApp/i);
-    const shown = joined(await say(phone, 'ana@example.com'));
+    const names = joined(await say(phone, 'sí, y autobús para los invitados', 'boda_hab_si'));
+    assert.match(names, /llam/i);
+    await say(phone, 'Ana y Luis');
+    const visit = joined(await say(phone, 'ana@example.com'));
+    assert.match(visit, /ver la casa/i);
+    await say(phone, 'sí', 'boda_vis_si');
+    const shown = joined(await say(phone, '20/06/2027 a las 12'));
     assert.match(shown, /Ana y Luis/);
     assert.match(shown, /120/);
-    assert.match(shown, /Ceremonia en la finca: sí/);
+    assert.match(shown, /Ceremonia: en la hostería/);
+    assert.match(shown, /Alojamiento: sí/);
+    assert.match(shown, /Visita/);
     assert.match(shown, /no queda reservada/);
     assert.match(shown, /Traslado/);
     assert.doesNotMatch(shown, /\d+\s*€/);
@@ -535,7 +544,7 @@ describe('bodas, empresa y avisos', () => {
       const messages = await say(phone, phrase);
       assert.equal(sessions.get(phone).step, 'GRUPO');
       assert.equal(sessions.get(phone).data.flow, 'boda');
-      assert.equal(sessions.get(phone).data.stage, 'couple');
+      assert.equal(sessions.get(phone).data.stage, 'wdate');
       assertBodaIntro(joined(messages));
       assert.equal(reservations.length, 0);
     }
@@ -562,8 +571,11 @@ describe('bodas, empresa y avisos', () => {
     assert.equal(saved.time, 'boda');
     assert.equal(saved.partySize, 120);
     assert.equal(saved.name, 'Ana y Luis');
-    assert.match(saved.details, /Ceremonia en la finca: sí/);
+    assert.match(saved.details, /Ceremonia: en la hostería/);
+    assert.match(saved.details, /Alojamiento: sí/);
     assert.match(saved.details, /ana@example\.com/);
+    assert.match(saved.details, /Visita:/);
+    assert.match(saved.details, /12:00/);
     assert.match(saved.details, /Traslado: interesado/);
     assert.equal(saved.admin_alert, undefined);
     const admin = sent.filter((m) => m.to === '34699999999');
@@ -572,6 +584,10 @@ describe('bodas, empresa y avisos', () => {
     assert.match(admin[0].body, /SOLICITUD BODA/);
     assert.match(admin[0].body, /#1/);
     assert.match(admin[0].body, /Ana y Luis/);
+    assert.match(admin[0].body, /OK 1/);
+    assert.match(admin[0].body, /NO 1/);
+    assert.match(admin[0].body, /Visita/);
+    assert.doesNotMatch(admin[0].body, /661\s*724\s*158|34661724158/);
   });
 
   it('mesa para 4 mañana sigue siendo el restaurante', async () => {
@@ -644,6 +660,129 @@ describe('bodas, empresa y avisos', () => {
     assert.equal(reservations[0].admin_alert, 'failed');
     assert.match(reservations[0].details, /Aviso admin: no enviado/);
     assert.equal(sent.filter((m) => m.to === '34699999999').length, 0);
+  });
+});
+
+describe('intención de boda, sin robar otros flujos', () => {
+  const opens = [
+    'Quiero información para mi boda',
+    'quiero informacion para mi boda',
+    'nos queremos casar',
+    'banquete de boda',
+    'la pedida',
+    'preboda',
+    'postboda',
+    'ceremonia civil',
+    'aniversario de boda',
+    'nuestro enlace',
+  ];
+
+  for (const phrase of opens) {
+    it(`«${phrase}» abre bodas`, () => {
+      assert.equal(grupos.classifyIncoming(normalize(phrase)).kind, 'boda');
+    });
+  }
+
+  const keeps = [
+    ['menús de Navidad', 'empresa_overview'],
+    ['comida de navidad para empresa', 'empresa_overview'],
+    ['menú de Navidad', null],
+    ['menú nochevieja', null],
+    ['comida de empresa', 'empresa_overview'],
+    ['evento de empresa', 'congreso'],
+    ['congreso de 300 personas', 'congreso'],
+    ['quiero una habitación', null],
+    ['mesa para 4 mañana', null],
+  ];
+
+  for (const [phrase, kind] of keeps) {
+    it(`«${phrase}» no es una boda`, () => {
+      const intent = grupos.classifyIncoming(normalize(phrase));
+      assert.equal(intent && intent.kind, kind);
+    });
+  }
+
+  it('el texto del enlace abre el flujo, manda fotos y no el restaurante', async () => {
+    const messages = await say('34600000201', 'Quiero información para mi boda');
+    assert.equal(sessions.get('34600000201').data.flow, 'boda');
+    assert.equal(sessions.get('34600000201').data.stage, 'wdate');
+    assert.match(joined(messages), /presupuesto a medida/);
+    assert.equal(messages.filter((m) => m.kind === 'image').length, 3);
+    assert.doesNotMatch(joined(messages), /Restaurante Don Fadrique/);
+    assert.doesNotMatch(joined(messages), /661|650/);
+  });
+
+  it('responde dudas de boda, acepta no lo sé y sigue pregunta a pregunta', async () => {
+    const phone = '34600000202';
+    await say(phone, 'Quiero información para mi boda');
+    let body = joined(await say(phone, '¿podemos llevar nuestro wedding planner?'));
+    assert.match(body, /caso por caso/);
+    assert.match(body, /fecha/i);
+    assert.equal(sessions.get(phone).data.stage, 'wdate');
+    assert.doesNotMatch(body, /siempre|nunca/i);
+
+    await say(phone, 'no lo sé todavía');
+    assert.equal(sessions.get(phone).data.date, 'por concretar');
+    body = joined(await say(phone, '¿hacéis menú infantil?'));
+    assert.match(body, /adapta a petición/);
+    assert.doesNotMatch(body, /\d+\s*€/);
+    assert.equal(sessions.get(phone).data.stage, 'guests');
+
+    body = joined(await say(phone, 'somos vegetarianos'));
+    assert.match(body, /vegetariano/);
+    assert.match(body, /gluten/);
+    await say(phone, 'no lo sé todavía');
+    assert.equal(sessions.get(phone).data.stage, 'ceremony');
+    assert.equal(sessions.get(phone).data.partySize, null);
+
+    body = joined(await say(phone, '¿se puede poner música hasta tarde?'));
+    assert.match(body, /caso por caso/);
+    assert.doesNotMatch(body, /siempre|nunca/i);
+    assert.equal(sessions.get(phone).data.stage, 'ceremony');
+
+    body = joined(await say(phone, '¿admitís perros?'));
+    assert.match(body, /mascotas/);
+    assert.match(body, /923 37 00 76|en la hostería|banquete/);
+    assert.doesNotMatch(body, /661|650|34661724158/);
+  });
+
+  it('más fotos enseña otras bodas y no abandona la solicitud', async () => {
+    const phone = '34600000203';
+    await say(phone, 'boda');
+    const messages = await say(phone, 'más fotos');
+    const images = messages.filter((m) => m.kind === 'image');
+    assert.ok(images.length >= 2 && images.length <= 3);
+    assert.match(joined(messages), /Arco de ceremonia|Invitados en el banquete|desde arriba/);
+    assert.match(joined(messages), /fecha/i);
+    assert.equal(sessions.get(phone).data.flow, 'boda');
+    assert.equal(sessions.get(phone).data.stage, 'wdate');
+  });
+
+  it('una preboda con visita por concretar queda pendiente y avisa a Nico con el código', async () => {
+    const phone = '34600000204';
+    await say(phone, 'preboda');
+    await say(phone, 'verano de 2027');
+    await say(phone, 'no lo sé todavía');
+    await say(phone, 'solo banquete', 'boda_no');
+    await say(phone, 'aún no', 'boda_hab_ns');
+    await say(phone, 'no lo sé todavía');
+    await say(phone, 'este');
+    await say(phone, 'sí', 'boda_vis_si');
+    const shown = joined(await say(phone, 'no lo sé todavía'));
+    assert.match(shown, /por concretar/);
+    await say(phone, 'enviar', 'emp_send');
+    const saved = reservations.at(-1);
+    assert.equal(saved.type, 'evento_boda');
+    assert.equal(saved.status, 'pending');
+    assert.equal(saved.partySize, null);
+    assert.match(saved.details, /Ceremonia: solo banquete/);
+    assert.match(saved.details, /Alojamiento: aún no/);
+    assert.match(saved.details, /Visita: por concretar/);
+    assert.match(saved.name, /por concretar/);
+    const admin = sent.filter((m) => m.to === '34699999999').at(-1);
+    assert.match(admin.body, /OK /);
+    assert.match(admin.body, /SOLICITUD BODA/);
+    assert.doesNotMatch(joined(sent.filter((m) => m.to === phone)), /confirmad/i);
   });
 });
 
@@ -822,9 +961,9 @@ describe('fotos de la hostería', () => {
     assert.ok(images.length >= 2 && images.length <= 4);
     assert.match(images.map((m) => m.body).join('\n'), /jardín/i);
     assert.match(joined(messages), /Bodas en/);
-    assert.match(joined(messages), /novios/);
+    assert.match(joined(messages), /fecha|no lo sé/i);
     assert.equal(sessions.get('34600000082').data.flow, 'boda');
-    assert.equal(sessions.get('34600000082').data.stage, 'couple');
+    assert.equal(sessions.get('34600000082').data.stage, 'wdate');
     assert.equal(reservations.length, 0);
   });
 
@@ -833,9 +972,9 @@ describe('fotos de la hostería', () => {
     assert.equal(messages[0].kind, 'text');
     assert.match(messages[0].body, /Bodas en/);
     const images = imagesOf(messages);
-    assert.ok(images.length >= 1 && images.length <= 2);
+    assert.ok(images.length >= 2 && images.length <= 3);
     assert.ok(messages.slice(1, 1 + images.length).every((m) => m.kind === 'image'));
-    assert.match(messages.at(-1).body, /novios/);
+    assert.match(messages.at(-1).body, /fecha|no lo sé/i);
     assert.equal(sessions.get('34600000083').data.flow, 'boda');
   });
 
@@ -871,24 +1010,23 @@ describe('fotos de la hostería', () => {
   it('en el jardín, durante la boda, sigue siendo la respuesta de la ceremonia', async () => {
     const phone = '34600000088';
     await say(phone, 'quiero una boda');
-    await say(phone, 'Ana y Luis');
     await say(phone, '12/06/2027');
     await say(phone, '120');
     const messages = await say(phone, 'en el jardin');
     assert.equal(imagesOf(messages).length, 0);
-    assert.equal(sessions.get(phone).data.stage, 'wneeds');
-    assert.equal(sessions.get(phone).data.ceremony, 'sí');
+    assert.equal(sessions.get(phone).data.stage, 'rooms');
+    assert.equal(sessions.get(phone).data.ceremony, 'en la hostería');
   });
 
   it('pedir fotos a mitad de la boda no abandona la solicitud', async () => {
     const phone = '34600000089';
     await say(phone, 'quiero una boda');
-    await say(phone, 'Ana y Luis');
+    await say(phone, 'junio de 2027');
     const messages = await say(phone, 'fotos del jardin');
     assert.ok(imagesOf(messages).length >= 2);
     assert.match(joined(messages), /seguimos/);
     assert.equal(sessions.get(phone).data.flow, 'boda');
-    assert.equal(sessions.get(phone).data.stage, 'wdate');
+    assert.equal(sessions.get(phone).data.stage, 'guests');
   });
 
   it('si el envío de la imagen falla, el cliente sigue recibiendo el texto', async () => {
@@ -925,14 +1063,15 @@ describe('fotos de la hostería', () => {
     await say(wedding, 'quiero una boda');
     const noted = await say(wedding, '', null, { type: 'image', image: { id: 'media-boda' } });
     assert.match(joined(noted), /solicitud/);
-    assert.equal(sessions.get(wedding).data.stage, 'couple');
+    assert.equal(sessions.get(wedding).data.stage, 'wdate');
     assert.equal(sessions.get(wedding).data.fotosCliente, 1);
-    await say(wedding, 'Ana y Luis');
     await say(wedding, '12/06/2027');
     await say(wedding, '80');
     await say(wedding, 'sí', 'boda_si');
-    await say(wedding, 'nada');
+    await say(wedding, 'no', 'boda_hab_no');
+    await say(wedding, 'Ana y Luis');
     await say(wedding, 'ana@example.com');
+    await say(wedding, 'ahora no', 'boda_vis_no');
     await say(wedding, 'enviar', 'emp_send');
     assert.match(reservations.at(-1).details, /El cliente envió 1 foto por WhatsApp/);
     const admin = sent.filter((m) => m.to === '34699999999').at(-1);

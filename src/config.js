@@ -41,6 +41,7 @@ module.exports = {
     timezone: 'Europe/Madrid',
     address: 'Ctra. de Salamanca - Alba, Km 17, 37800 Alba de Tormes (Salamanca)',
     phone: '923 37 00 76',
+    email: 'reservas@donfadrique.com',
     web: 'https://www.donfadrique.com/',
     hotelBookingUrl: 'https://www.reservaonline.support/donfadrique/reservas.html',
     advanceBookingDays: 60,

@@ -95,21 +95,54 @@ const CATALOG = {
     caption: 'Salón preparado para un evento.',
     source: 'https://www.donfadrique.com/wp-content/uploads/WEB-EVENTOS-19.jpg',
   },
+  // Bodas reales publicadas en la página de eventos de la hostería.
+  bodaCeremonia: {
+    file: 'boda-ceremonia.jpg',
+    caption: 'Ceremonia en el jardín.',
+    source: 'https://www.donfadrique.com/wp-content/uploads/WEB-EVENTOS-6.jpg',
+  },
+  bodaMesas: {
+    file: 'boda-mesas.jpg',
+    caption: 'Salón montado para el banquete.',
+    source: 'https://www.donfadrique.com/wp-content/uploads/IMG-20220523-WA0006.jpg',
+  },
+  bodaTerraza: {
+    file: 'boda-terraza.jpg',
+    caption: 'Mesa en la terraza, con el jardín al fondo.',
+    source: 'https://www.donfadrique.com/wp-content/uploads/1265.jpg',
+  },
+  bodaAerea: {
+    file: 'boda-aerea.jpg',
+    caption: 'La ceremonia en el jardín, desde arriba.',
+    source: 'https://www.donfadrique.com/wp-content/uploads/web-eventos-27.jpg',
+  },
+  bodaArco: {
+    file: 'boda-arco.jpg',
+    caption: 'Arco de ceremonia con vistas a Alba de Tormes.',
+    source: 'https://www.donfadrique.com/wp-content/uploads/WEB-EVENTOS-2.jpg',
+  },
+  bodaInvitados: {
+    file: 'boda-invitados.jpg',
+    caption: 'Invitados en el banquete.',
+    source: 'https://www.donfadrique.com/wp-content/uploads/IMG-20220920-WA0015.jpg',
+  },
 };
 
 const ALBUMS = {
   general: ['exterior', 'vistasAlba', 'terrazaDia', 'habitacionClasica'],
   habitaciones: ['habitacionHierro', 'habitacionAzul', 'habitacionClasica'],
-  bodas: ['ceremonia', 'invitados', 'banqueteBoda', 'jardinNoche'],
+  bodas: ['bodaCeremonia', 'bodaMesas', 'bodaTerraza', 'bodaArco'],
   restaurante: ['mesaBanquete', 'salonRestaurante', 'mesaRestaurante', 'plato'],
   terraza: ['terrazaDia', 'terrazaInterior', 'terrazaVistas'],
   eventos: ['salonEvento', 'terrazaDia', 'mesaBanquete'],
 };
 
 const PRESENTATION = {
-  boda: ['ceremonia', 'invitados'],
+  boda: ['bodaCeremonia', 'bodaMesas', 'bodaTerraza'],
   congreso: ['salonEvento', 'terrazaDia'],
 };
+
+const WEDDING_MORE = ['bodaAerea', 'bodaArco', 'bodaInvitados'];
 
 // Pide ver el sitio. El texto ya viene normalizado (sin tildes, en minúsculas).
 const SEEING =
@@ -162,6 +195,15 @@ function presentationReplies(flow) {
   return photosByKeys(keys);
 }
 
+function moreWeddingReplies() {
+  return photosByKeys(WEDDING_MORE);
+}
+
+function isMoreWeddingPhotos(norm) {
+  if (!norm) return false;
+  return /\bmas fotos\b|\botras fotos\b|\bmas imagenes\b/.test(norm);
+}
+
 function catalog() {
   return Object.values(CATALOG);
 }
@@ -192,6 +234,8 @@ module.exports = {
   categoryFor,
   album,
   presentationReplies,
+  moreWeddingReplies,
+  isMoreWeddingPhotos,
   catalog,
   publicBaseUrl,
   publicUrl,

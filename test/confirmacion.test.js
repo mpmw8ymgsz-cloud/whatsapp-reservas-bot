@@ -176,6 +176,27 @@ describe('mensajes al cliente', () => {
     assert.doesNotMatch(text, /34611111111|34600000005/);
   });
 
+  it('la visita de una boda se confirma sin dar por cerrada la fecha ni un móvil', () => {
+    const text = customerConfirmed({
+      id: 21,
+      phone: '34611222333',
+      name: 'Ana y Luis',
+      party_size: 120,
+      date: '2027-06-12',
+      time: 'boda',
+      type: 'evento_boda',
+      details:
+        'Pareja/contacto: Ana y Luis | Fecha: sábado 12 de junio de 2027 | Invitados aprox.: 120 | Ceremonia: en la hostería | Visita: sábado 20 de junio de 2027, 12:00 | Tel: 34611222333 | WhatsApp: 34611222333',
+    });
+    assert.match(text, /confirmada\* la visita/);
+    assert.match(text, /20 de junio de 2027/);
+    assert.match(text, /12:00/);
+    assert.match(text, /presupuesto a medida/);
+    assert.match(text, /120 invitados/);
+    assertPublicContact(text);
+    assert.doesNotMatch(text, /34611222333/);
+  });
+
   it('el acuse inicial no da la reserva por confirmada', () => {
     const text = customerPending({
       id: 3,

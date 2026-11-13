@@ -71,12 +71,16 @@ function startCongreso(business, options = {}) {
   };
 }
 
+function datePrompt() {
+  return '¿Qué fecha tenéis en mente, aunque sea aproximada? Vale un día, una estación o el año. Si aún no lo sabéis, escribid *no lo sé todavía*.';
+}
+
 function startBoda(business, options = {}) {
   const replies = [text(conocimiento.bodaIntro(business.name))];
   if (options.withPhotos !== false) replies.push(...fotos.presentationReplies('boda'));
-  replies.push(text('¿Cómo se llaman los novios, o el nombre de contacto?'));
+  replies.push(text(datePrompt()));
   return {
-    data: base('boda', 'couple'),
+    data: base('boda', 'wdate'),
     replies,
   };
 }
@@ -90,9 +94,21 @@ const HUB_BUTTONS = [
 const HUB_FOLLOWUP = '¿Seguimos con una boda, las comidas de Navidad o un congreso?';
 
 const CEREMONY_BUTTONS = [
-  { id: 'boda_si', title: 'Sí, en el jardín' },
-  { id: 'boda_no', title: 'No' },
-  { id: 'boda_ns', title: 'Aún no lo sabemos' },
+  { id: 'boda_si', title: 'En la hostería' },
+  { id: 'boda_no', title: 'Solo banquete' },
+  { id: 'boda_ns', title: 'Aún no lo sé' },
+];
+
+const ROOMS_BUTTONS = [
+  { id: 'boda_hab_si', title: 'Sí, habitaciones' },
+  { id: 'boda_hab_no', title: 'No hace falta' },
+  { id: 'boda_hab_ns', title: 'Aún no lo sé' },
+];
+
+const VISIT_BUTTONS = [
+  { id: 'boda_vis_si', title: 'Sí, una visita' },
+  { id: 'boda_vis_no', title: 'Ahora no' },
+  { id: 'boda_vis_ns', title: 'Aún no lo sé' },
 ];
 
 function startHub(business) {
@@ -368,16 +384,30 @@ function adminCongreso(data, from) {
   return appendPhotoNote(body, data);
 }
 
+function guestsLabel(data) {
+  if (data.guestsLabel) return data.guestsLabel;
+  if (data.partySize) return String(data.partySize);
+  return 'aún no';
+}
+
+function visitLabel(data) {
+  if (data.visitWhen) return data.visitWhen;
+  if (data.visit === 'sí') return 'sí, día por concretar';
+  if (data.visit === 'aún no') return 'aún no';
+  return 'no';
+}
+
 function bodaDetails(data, from) {
   const parts = [
     `Pareja/contacto: ${data.contactName}`,
     `Fecha: ${data.dateLabel}`,
-    `Invitados aprox.: ${data.partySize}`,
-    `Ceremonia en la finca: ${data.ceremony}`,
-    `Necesidades: ${data.needsRaw}`,
+    `Invitados aprox.: ${guestsLabel(data)}`,
+    `Ceremonia: ${data.ceremony}`,
+    `Alojamiento: ${data.rooms || 'no indicado'}`,
     `Email: ${data.email || '—'}`,
     `Tel: ${data.phoneContact}`,
     `WhatsApp: ${from}`,
+    `Visita: ${visitLabel(data)}`,
     trasladoNota(data),
     fotos.clientPhotoNote(data),
     'Estado: pendiente de presupuesto',
@@ -386,39 +416,56 @@ function bodaDetails(data, from) {
 }
 
 function reviewBoda(data, business) {
+  const people = data.partySize ? `${data.partySize} invitados, aprox.` : 'invitados por concretar';
+  const visita =
+    data.visit === 'sí'
+      ? `🏡 Visita: ${visitLabel(data)}\n`
+      : data.visit === 'aún no'
+        ? '🏡 Visita: aún no lo saben\n'
+        : '';
   return (
     `*Solicitud de boda*\n` +
     `Si la envías, el equipo de ${business.name} prepara el presupuesto. La fecha no queda reservada.\n\n` +
     `💍 ${data.contactName}\n` +
     `📅 ${data.dateLabel}\n` +
-    `👥 ${data.partySize} invitados, aprox.\n` +
-    `💒 Ceremonia en la finca: ${data.ceremony}\n` +
-    `📝 ${data.needsRaw}\n` +
+    `👥 ${people}\n` +
+    `💒 Ceremonia: ${data.ceremony}\n` +
+    `🛏️ Alojamiento: ${data.rooms || 'no indicado'}\n` +
+    `${visita}` +
     `✉️ ${data.email || 'sin email'}\n` +
     `📱 ${data.phoneContact}\n\n` +
     `${trasladoLinea(data)}` +
-    `Menú a medida. El precio se concreta en el presupuesto.\n\n` +
+    `Menú y precio: presupuesto a medida.\n\n` +
     `¿La envío así?`
   );
 }
 
 function thanksBoda(data, business) {
+  const people = data.partySize ? ` · ${data.partySize} invitados` : '';
+  const visita =
+    data.visit === 'sí'
+      ? `🏡 Visita anotada (${visitLabel(data)}). Queda pendiente: os escribo por aquí cuando haya respuesta.\n\n`
+      : '';
+  const mail = business.email || 'reservas@donfadrique.com';
   return (
     `Gracias. He anotado la solicitud nº {{id}} para *${data.contactName}*.\n\n` +
-    `📅 ${data.dateLabel} · ${data.partySize} invitados\n` +
-    `💒 Ceremonia en la finca: ${data.ceremony}\n\n` +
-    `Queda *pendiente de presupuesto*. En breve os escribe el equipo de ${business.name}. La fecha no queda reservada hasta entonces.\n\n` +
-    `📍 ${business.address}\n📞 ${business.phone}`
+    `📅 ${data.dateLabel}${people}\n` +
+    `💒 Ceremonia: ${data.ceremony}\n\n` +
+    `${visita}` +
+    `Queda *pendiente de presupuesto*. La fecha de la boda no queda reservada hasta entonces.\n\n` +
+    `📍 ${business.address}\n📞 ${business.phone}\n✉️ ${mail}`
   );
 }
 
 function adminBoda(data, from) {
+  const people = data.partySize ? `${data.partySize} invitados` : 'invitados por concretar';
   const body =
     `💍 SOLICITUD BODA pendiente de presupuesto #{{id}}\n` +
-    `Contacto: ${data.contactName}\n` +
-    `${data.dateLabel} · ${data.partySize} invitados\n` +
-    `Ceremonia en la finca: ${data.ceremony}\n` +
-    `Necesidades: ${data.needsRaw}\n` +
+    `Pareja: ${data.contactName}\n` +
+    `${data.dateLabel} · ${people}\n` +
+    `Ceremonia: ${data.ceremony}\n` +
+    `Alojamiento: ${data.rooms || 'no indicado'}\n` +
+    `Visita: ${visitLabel(data)}\n` +
     `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`;
   return appendPhotoNote(body, data);
 }
@@ -501,8 +548,14 @@ function stay(data, replies) {
 }
 
 function sideOr(data, raw, prompt) {
-  if (!looksLikeQuestion(raw)) return null;
-  const side = conocimiento.answerSideQuestion(normalize(raw), data.flow);
+  const norm = normalize(raw);
+  const faqAside =
+    data.flow === 'boda' &&
+    /planner|proveedor|infantil|gluten|vegetar|celiac|vegano|musica|mascota|\bperro|\bpiscina|bodega|huerta|michelin|repsol|hasta tarde/.test(
+      norm
+    );
+  if (!looksLikeQuestion(raw) && !faqAside) return null;
+  const side = conocimiento.answerSideQuestion(norm, data.flow);
   if (!side) return null;
   return stay(data, [text(`${side}\n\n${prompt}`)]);
 }
@@ -685,7 +738,7 @@ function parseWeddingWhen(textValue, zone) {
   }
 
   if (
-    /por concretar|sin fecha|fecha abierta|por decidir|aun no|todavia no|no lo sabemos|no sabemos|mas adelante|ya veremos|cuando se sepa/.test(
+    /por concretar|sin fecha|fecha abierta|por decidir|no lo se|aun no|todavia no|no sabemos|mas adelante|ya veremos|cuando se sepa/.test(
       t
     )
   ) {
@@ -713,51 +766,95 @@ function acceptableWhen(parsed, zone) {
   return true;
 }
 
+function isUnknown(norm) {
+  return /no lo se|no sabemos|aun no|todavia no|por concretar|sin fecha|no estoy segur|ya veremos|mas adelante|cuando se sepa/.test(
+    norm || ''
+  );
+}
+
 function isCeremonyReply(textValue, buttonId) {
   return parseCeremony(textValue, buttonId) != null;
 }
 
 function parseCeremony(textValue, buttonId) {
-  if (buttonId === 'boda_si') return 'sí';
-  if (buttonId === 'boda_no') return 'no';
+  if (buttonId === 'boda_si') return 'en la hostería';
+  if (buttonId === 'boda_no') return 'solo banquete';
   if (buttonId === 'boda_ns') return 'aún no';
   const n = normalize(textValue);
   if (!n) return null;
-  if (/aun no|todavia no|no lo sabemos|no sabemos|por decidir|quizas|quiza|ya veremos/.test(n)) return 'aún no';
-  if (/sin ceremonia|en otro sitio|fuera de la|ceremonia no/.test(n)) return 'no';
-  if (/^no\b/.test(n)) return 'no';
-  if (/en el jardin/.test(n) || /^si\b/.test(n)) return 'sí';
+  if (isUnknown(n) || /por decidir|quizas|quiza/.test(n)) return 'aún no';
+  if (/solo (el )?banquete|sin ceremonia|en otro sitio|fuera de la|ceremonia no/.test(n)) return 'solo banquete';
+  if (/^no\b/.test(n)) return 'solo banquete';
+  if (/hosteria|en el jardin|en la finca|en el hotel|aqui mismo|en la casa/.test(n) || /^si\b/.test(n)) {
+    return 'en la hostería';
+  }
   return null;
+}
+
+function parseStay(textValue, buttonId) {
+  if (buttonId === 'boda_hab_si') return 'sí';
+  if (buttonId === 'boda_hab_no') return 'no';
+  if (buttonId === 'boda_hab_ns') return 'aún no';
+  const n = normalize(textValue);
+  if (!n) return null;
+  if (isUnknown(n)) return 'aún no';
+  if (/sin habitacion|sin hotel|sin alojamiento|no hace falta|^no\b/.test(n)) return 'no';
+  if (/habitacion|alojamiento|dormir|pernoct|^si\b/.test(n)) return 'sí';
+  return null;
+}
+
+function parseVisitChoice(textValue, buttonId) {
+  if (buttonId === 'boda_vis_si') return 'sí';
+  if (buttonId === 'boda_vis_no') return 'no';
+  if (buttonId === 'boda_vis_ns') return 'aún no';
+  const n = normalize(textValue);
+  if (!n) return null;
+  if (isUnknown(n)) return 'aún no';
+  if (/^no\b|ahora no|no hace falta|paso/.test(n)) return 'no';
+  if (/^si\b|visita|ver la casa|verla|nos gustaria/.test(n)) return 'sí';
+  return null;
+}
+
+function parseVisitSlot(raw, zone) {
+  const norm = normalize(raw);
+  if (!norm) return null;
+  if (isUnknown(norm)) return 'por concretar';
+  const when = parseWeddingWhen(raw, zone);
+  let clock = '';
+  const tm = norm.match(/a\s+las\s+(\d{1,2})(?:[:.h](\d{2}))?/) || norm.match(/\b(\d{1,2})[:.h](\d{2})\b/);
+  if (tm) {
+    const hh = parseInt(tm[1], 10);
+    const mm = tm[2] ? parseInt(tm[2], 10) : 0;
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      clock = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+  }
+  if (!clock && /por la manana/.test(norm)) clock = 'por la mañana';
+  else if (!clock && /por la tarde/.test(norm)) clock = 'por la tarde';
+  else if (!clock && /al mediodia|a mediodia/.test(norm)) clock = 'al mediodía';
+  if (when && when.date !== 'por concretar') {
+    return clock ? `${when.dateLabel}, ${clock}` : when.dateLabel;
+  }
+  if (norm.length >= 3 && norm.length <= 80 && !looksLikeQuestion(raw)) return raw.trim();
+  return null;
+}
+
+function noteTransport(data, norm) {
+  if (/autobus|autocar|shuttle|traslado|transporte|\bbus\b/.test(norm || '')) data.transporte = true;
 }
 
 function handleBodaStages(data, raw, norm, buttonId, business, zone) {
   if (data.flow !== 'boda') return null;
-
-  if (data.stage === 'couple') {
-    const prompt = '¿Cómo se llaman los novios, o el nombre de contacto?';
-    const side = sideOr(data, raw, prompt);
-    if (side) return side;
-    const contactName = raw.trim();
-    if (contactName.length < 2) return stay(data, [text('Dime los nombres, aunque sea el de la persona de contacto.')]);
-    return {
-      data: { ...data, contactName, stage: 'wdate' },
-      customerName: contactName,
-      replies: [
-        text(
-          '¿Qué fecha tenéis en mente, aunque sea aproximada? Sirve un día (12/06/2027), un mes (junio de 2027) o una época (verano de 2027). Si aún no la hay, escribe *por concretar*.'
-        ),
-      ],
-    };
-  }
+  noteTransport(data, norm);
 
   if (data.stage === 'wdate') {
-    const prompt = '¿Qué fecha tenéis, aunque sea aproximada? Por ejemplo, 12/06/2027, junio de 2027 o verano de 2027.';
+    const prompt = datePrompt();
     const side = sideOr(data, raw, prompt);
     if (side) return side;
     const when = parseWeddingWhen(raw, zone);
     if (!when || !acceptableWhen(when, zone)) {
       return stay(data, [
-        text('No entendí esa fecha, ya pasó o queda a más de dos años. Prueba con 12/06/2027, junio de 2027, o escribe *por concretar*.'),
+        text('No entendí esa fecha, ya pasó o queda a más de dos años. Prueba con 12/06/2027, junio de 2027, verano de 2027, o escribe *no lo sé todavía*.'),
       ]);
     }
     return stay(
@@ -769,60 +866,94 @@ function handleBodaStages(data, raw, norm, buttonId, business, zone) {
         dateApproximate: when.approximate,
         stage: 'guests',
       },
-      [text(`${when.dateLabel}. ¿Cuántos invitados, aproximadamente? Los espacios, juntos, admiten de 500 a 700.`)]
+      [text(`${when.dateLabel}. ¿Cuántos invitados, aproximadamente? Si aún no lo sabéis, escribid *no lo sé todavía*.`)]
     );
   }
 
   if (data.stage === 'guests') {
-    const prompt = '¿Cuántos invitados, aproximadamente?';
+    const prompt = '¿Cuántos invitados, aproximadamente? Si aún no lo sabéis, escribid *no lo sé todavía*.';
     const side = sideOr(data, raw, prompt);
     if (side) return side;
     const n = parseParty(raw);
-    if (!n) return stay(data, [text('Dime un número aproximado de invitados, por ejemplo 120.')]);
-    if (n > conocimiento.MAX_AFORO) {
-      return stay(data, [
-        text(
-          `Los espacios, juntos, admiten de 500 a 700 personas. No puedo anotar ${n}. Dime un número dentro de ese aforo.`
-        ),
-      ]);
+    if (isUnknown(norm) && !n) {
+      return stay(
+        { ...data, partySize: null, guestsLabel: 'aún no', stage: 'ceremony' },
+        [buttons('Sin problema. ¿La ceremonia sería en la hostería o solo el banquete?', CEREMONY_BUTTONS)]
+      );
     }
+    if (!n || n > 9999) return stay(data, [text('Dime un número aproximado de invitados, por ejemplo 120, o escribe *no lo sé todavía*.')]);
     return stay(
-      { ...data, partySize: n, stage: 'ceremony' },
-      [buttons(`${n} invitados. ¿La ceremonia sería en el jardín de la hostería?`, CEREMONY_BUTTONS)]
+      { ...data, partySize: n, guestsLabel: String(n), stage: 'ceremony' },
+      [buttons(`${n} invitados. ¿La ceremonia sería en la hostería o solo el banquete?`, CEREMONY_BUTTONS)]
     );
   }
 
   if (data.stage === 'ceremony') {
+    const side = sideOr(data, raw, '¿La ceremonia sería en la hostería o solo el banquete?');
+    if (side && !parseCeremony(raw, buttonId)) return side;
     const ceremony = parseCeremony(raw, buttonId);
     if (!ceremony) {
-      return stay(data, [buttons('¿La ceremonia sería en el jardín de la hostería?', CEREMONY_BUTTONS)]);
+      return stay(data, [buttons('¿La ceremonia sería en la hostería o solo el banquete?', CEREMONY_BUTTONS)]);
     }
     return stay(
-      { ...data, ceremony, stage: 'wneeds' },
-      [
-        text(
-          '¿Qué más necesitáis? Habitaciones para los invitados, música, autobús u otra cosa. Si no hace falta nada más, escribe *nada*.'
-        ),
-      ]
+      { ...data, ceremony, stage: 'rooms' },
+      [buttons('¿Queréis habitación para los invitados? Hay 21 dobles.', ROOMS_BUTTONS)]
     );
   }
 
-  if (data.stage === 'wneeds') {
-    const prompt = '¿Qué más necesitáis? Habitaciones, música, autobús… o escribe *nada*.';
-    if (
-      looksLikeQuestion(raw) &&
-      conocimiento.answerSideQuestion(norm, 'boda') &&
-      raw.trim().length < 80 &&
-      !/,| y /.test(norm)
-    ) {
-      return stay(data, [text(`${conocimiento.answerSideQuestion(norm, 'boda')}\n\n${prompt}`)]);
+  if (data.stage === 'rooms') {
+    const side = sideOr(data, raw, '¿Queréis habitación para los invitados? Hay 21 dobles.');
+    if (side && !parseStay(raw, buttonId)) return side;
+    const rooms = parseStay(raw, buttonId);
+    if (!rooms) {
+      return stay(data, [buttons('¿Queréis habitación para los invitados? Hay 21 dobles.', ROOMS_BUTTONS)]);
     }
-    let needsRaw = raw.trim();
-    if (/^(nada|no|ninguna|ninguno|solo eso|nada mas|no hace falta)$/.test(norm)) needsRaw = 'sin necesidades extra';
-    if (needsRaw.length < 2) return stay(data, [text(prompt)]);
-    const next = { ...data, needsRaw, stage: 'reach' };
-    if (/autobus|autocar|shuttle|traslado|transporte|\bbus\b/.test(norm)) next.transporte = true;
-    return stay(next, [reachPrompt()]);
+    return stay(
+      { ...data, rooms, stage: 'couple' },
+      [text('¿Cómo os llamáis? Si preferís no decirlo todavía, escribid *no lo sé todavía*.')]
+    );
+  }
+
+  if (data.stage === 'couple') {
+    const prompt = '¿Cómo os llamáis? Si preferís no decirlo todavía, escribid *no lo sé todavía*.';
+    const side = sideOr(data, raw, prompt);
+    if (side) return side;
+    const contactName = isUnknown(norm) ? 'por concretar' : raw.trim();
+    if (contactName.length < 2) return stay(data, [text('Dime los nombres, o escribe *no lo sé todavía*.')]);
+    return {
+      data: { ...data, contactName, stage: 'reach' },
+      customerName: contactName === 'por concretar' ? null : contactName,
+      replies: [reachPromptFor(data)],
+    };
+  }
+
+  if (data.stage === 'visit') {
+    const side = sideOr(data, raw, '¿Queréis venir a ver la casa?');
+    if (side && !parseVisitChoice(raw, buttonId)) return side;
+    const visit = parseVisitChoice(raw, buttonId);
+    if (!visit) {
+      return stay(data, [buttons('¿Queréis venir a ver la casa?', VISIT_BUTTONS)]);
+    }
+    if (visit !== 'sí') {
+      return stay(
+        { ...data, visit, visitWhen: null, stage: 'review' },
+        [buttons(reviewFor({ ...data, visit, visitWhen: null }, business), REVIEW_BUTTONS)]
+      );
+    }
+    return stay(
+      { ...data, visit, stage: 'visitwhen' },
+      [text('Qué bien. ¿Qué día y a qué hora os vendría bien? Puede ser aproximado. Si aún no lo sabéis, escribid *no lo sé todavía*.')]
+    );
+  }
+
+  if (data.stage === 'visitwhen') {
+    const prompt = '¿Qué día y a qué hora os vendría bien la visita? Si aún no lo sabéis, escribid *no lo sé todavía*.';
+    const side = sideOr(data, raw, prompt);
+    if (side) return side;
+    const slot = parseVisitSlot(raw, zone);
+    if (!slot) return stay(data, [text(prompt)]);
+    const next = { ...data, visitWhen: slot, stage: 'review' };
+    return stay(next, [buttons(reviewFor(next, business), REVIEW_BUTTONS)]);
   }
 
   return null;
@@ -867,8 +998,8 @@ function handle(ctx) {
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
   if (buttonId === 'emp_fix' || (data.stage === 'review' && /corregir|repetir|cambiar/.test(norm))) {
     if (data.flow === 'boda') {
-      return stay({ flow: 'boda', stage: 'couple' }, [
-        text('De acuerdo, lo repetimos. ¿Cómo se llaman los novios, o el nombre de contacto?'),
+      return stay({ flow: 'boda', stage: 'wdate' }, [
+        text(`De acuerdo, lo repetimos. ${datePrompt()}`),
       ]);
     }
     const kept = { flow: data.flow, stage: 'company' };
@@ -1069,12 +1200,30 @@ function handle(ctx) {
   }
 
   if (data.stage === 'reach') {
-    const prompt = reachPrompt().body;
+    const prompt = reachPromptFor(data).body;
     const side = sideOr(data, raw, prompt);
     if (side) return side;
-    const reach = parseReach(raw, from);
+    const reach =
+      data.flow === 'boda' && isUnknown(norm) ? { email: null, phone: from } : parseReach(raw, from);
     if (!reach) {
-      return stay(data, [text('Necesito un email o un teléfono. También puedes escribir *este* para usar este WhatsApp.')]);
+      return stay(data, [
+        text(
+          data.flow === 'boda'
+            ? 'Necesito un email o que me digáis *este* para usar este WhatsApp.'
+            : 'Necesito un email o un teléfono. También puedes escribir *este* para usar este WhatsApp.'
+        ),
+      ]);
+    }
+    if (data.flow === 'boda') {
+      const next = {
+        ...data,
+        email: reach.email,
+        phoneContact: reach.phone === from ? 'este WhatsApp' : reach.phone,
+        stage: 'visit',
+      };
+      return stay(next, [
+        buttons('¿Queréis venir a ver la casa? Si os encaja, dejo la visita pendiente y el equipo la confirma por aquí.', VISIT_BUTTONS),
+      ]);
     }
     const next = {
       ...data,
@@ -1111,15 +1260,19 @@ function handle(ctx) {
 function stagePrompt(data) {
   switch (data.stage) {
     case 'couple':
-      return '¿Cómo se llaman los novios, o el nombre de contacto?';
+      return '¿Cómo os llamáis? Si preferís no decirlo todavía, escribid *no lo sé todavía*.';
     case 'wdate':
-      return '¿Qué fecha tenéis, aunque sea aproximada? Por ejemplo, 12/06/2027, junio de 2027 o verano de 2027.';
+      return datePrompt();
     case 'guests':
-      return '¿Cuántos invitados, aproximadamente?';
+      return '¿Cuántos invitados, aproximadamente? Si aún no lo sabéis, escribid *no lo sé todavía*.';
     case 'ceremony':
-      return '¿La ceremonia sería en el jardín de la hostería?';
-    case 'wneeds':
-      return '¿Qué más necesitáis? Habitaciones, música, autobús… o escribe nada.';
+      return '¿La ceremonia sería en la hostería o solo el banquete?';
+    case 'rooms':
+      return '¿Queréis habitación para los invitados? Hay 21 dobles.';
+    case 'visit':
+      return '¿Queréis venir a ver la casa?';
+    case 'visitwhen':
+      return '¿Qué día y a qué hora os vendría bien la visita? Si aún no lo sabéis, escribid *no lo sé todavía*.';
     case 'company':
       return '¿A nombre de qué empresa o entidad lo preparo?';
     case 'contact':
@@ -1180,7 +1333,13 @@ function faqDuringFlow(data, raw, norm, business) {
     ]);
   }
   if (data.stage === 'ceremony') {
-    return stay(data, [text(body), buttons('¿La ceremonia sería en el jardín de la hostería?', CEREMONY_BUTTONS)]);
+    return stay(data, [text(body), buttons('¿La ceremonia sería en la hostería o solo el banquete?', CEREMONY_BUTTONS)]);
+  }
+  if (data.stage === 'rooms') {
+    return stay(data, [text(body), buttons('¿Queréis habitación para los invitados? Hay 21 dobles.', ROOMS_BUTTONS)]);
+  }
+  if (data.stage === 'visit') {
+    return stay(data, [text(body), buttons('¿Queréis venir a ver la casa?', VISIT_BUTTONS)]);
   }
   if (data.stage === 'review') {
     return stay(data, [text(body), buttons(reviewFor(data, business), REVIEW_BUTTONS)]);
@@ -1192,6 +1351,36 @@ function reachPrompt() {
   return text(
     '¿A qué email enviamos el presupuesto? Si lo prefieres por teléfono, escríbeme el número, o *este* para usar este WhatsApp.'
   );
+}
+
+function reachPromptFor(data) {
+  if (data && data.flow === 'boda') {
+    return text('¿Os escribimos por este WhatsApp? El email es opcional. Escribid *este*, o dejad un correo.');
+  }
+  return reachPrompt();
+}
+
+function promptReplies(data, business) {
+  if (!data) return [text('Seguimos cuando quieras.')];
+  if (data.stage === 'ceremony') {
+    return [buttons('¿La ceremonia sería en la hostería o solo el banquete?', CEREMONY_BUTTONS)];
+  }
+  if (data.stage === 'rooms') {
+    return [buttons('¿Queréis habitación para los invitados? Hay 21 dobles.', ROOMS_BUTTONS)];
+  }
+  if (data.stage === 'visit') {
+    return [buttons('¿Queréis venir a ver la casa?', VISIT_BUTTONS)];
+  }
+  if (data.stage === 'service') {
+    return [
+      buttons('¿Lo hacéis en comida o en cena?', [
+        { id: 'emp_comida', title: 'Comida' },
+        { id: 'emp_cena', title: 'Cena' },
+      ]),
+    ];
+  }
+  if (data.stage === 'review') return [buttons(reviewFor(data, business), REVIEW_BUTTONS)];
+  return [text(stagePrompt(data))];
 }
 
 function paxPrompt() {
@@ -1209,6 +1398,7 @@ module.exports = {
   startOverview,
   isCeremonyReply,
   handle,
+  promptReplies,
   stampId,
   parseRange,
   parseReach,
