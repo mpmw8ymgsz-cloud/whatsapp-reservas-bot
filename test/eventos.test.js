@@ -117,6 +117,9 @@ Module.prototype.require = function (id) {
 
 const { handleIncoming } = require('../src/conversation');
 const menus = require('../src/menusEmpresa');
+const grupos = require('../src/grupos');
+const fiesta = require('../src/menusFiesta');
+const { normalize } = require('../src/dateParser');
 const conocimiento = require('../src/eventosConocimiento');
 const faq = require('../src/faqLlegada');
 const { renderAdminPage } = require('../src/server-meta');
@@ -906,5 +909,268 @@ describe('plantilla de Navidad: respuestas', () => {
     const messages = await say('34655500006', 'Pedir presupuesto');
     assert.equal(sessions.get('34655500006').step, 'GRUPO');
     assert.match(joined(messages), /Comidas de Navidad para empresas/);
+  });
+});
+
+describe('menús oficiales de Navidad, Nochevieja y Año Nuevo', () => {
+  const PERSONAL = /650\s*488\s*113|661\s*724\s*158|650488113|661724158|34650488113|34661724158/;
+
+  function imagesOf(messages) {
+    return messages.filter((message) => message.kind === 'image');
+  }
+
+  it('la comida de empresa cita los menús oficiales como referencia y no cambia el precio', () => {
+    const text = menus.overviewText('Hostería Don Fadrique');
+    assert.match(text, /menús oficiales de Navidad, Nochevieja y Año Nuevo/);
+    assert.match(text, /como referencia/);
+    assert.match(text, /Escribe \*menús\* y te los envío/);
+    assert.match(text, /menú a medida/);
+    assert.match(text, /desde 55 € \+ IVA por persona/);
+    assert.deepEqual(text.match(/\d+\s*€/g), ['55 €']);
+    assert.doesNotMatch(text, OLD_OFFER);
+    assert.doesNotMatch(text, PERSONAL);
+  });
+
+  it('el enlace «Quiero ver los menús de Navidad» manda las tres cartas y el cochinillo', async () => {
+    const phone = '34600000101';
+    const messages = await say(phone, 'Quiero ver los menús de Navidad');
+    const body = joined(messages);
+    assert.match(messages[0].body, /Menús de las fiestas/);
+    assert.match(body, /jamón y lomo; gamba blanca Don Fadrique; paté de pato y fiambres navideños/);
+    assert.match(body, /capuchino de lentejas con perdiz/);
+    assert.match(body, /stracciatella artesana/);
+    assert.match(body, /65 € por persona/);
+    assert.match(body, /110 € por persona/);
+    assert.match(body, /Todos nuestros menús se pueden adaptar a alergias e intolerancias/);
+    assert.doesNotMatch(body, /\bIVA\b/);
+    assert.doesNotMatch(body, /55 €/);
+    assert.doesNotMatch(body, PERSONAL);
+    assert.doesNotMatch(body, /@/);
+    const images = imagesOf(messages);
+    assert.deepEqual(
+      images.map((image) => image.link),
+      [
+        'https://whatsapp-reservas-bot.onrender.com/menus/menu-navidad-25dic.jpg',
+        'https://whatsapp-reservas-bot.onrender.com/menus/menu-nochevieja-31dic.jpg',
+        'https://whatsapp-reservas-bot.onrender.com/menus/menu-anonuevo-1ene.jpg',
+        'https://whatsapp-reservas-bot.onrender.com/fotos/cochinillo.jpg',
+      ]
+    );
+    assert.match(images.at(-1).body, /Cochinillo/);
+    const tail = messages.at(-1);
+    assert.equal(tail.kind, 'buttons');
+    assert.match(tail.body, /reservar/);
+    assert.match(tail.body, /presupuesto/);
+    assert.deepEqual(
+      tail.buttons.map((button) => button.id),
+      ['exp_rest', 'emp_book']
+    );
+    assert.equal(sessions.has(phone), false);
+  });
+
+  it('reservar abre el restaurante y pedir presupuesto abre la comida de empresa', async () => {
+    const phone = '34600000102';
+    await say(phone, 'ver los menús');
+    let messages = await say(phone, 'Reservar', 'exp_rest');
+    assert.match(joined(messages), /Restaurante Don Fadrique/);
+    assert.match(joined(messages), /qué día/i);
+    assert.equal(sessions.get(phone).step, 'DATE');
+
+    messages = await say('34600000103', 'carta');
+    messages = await say('34600000103', 'Pedir presupuesto', 'emp_book');
+    assert.equal(sessions.get('34600000103').data.flow, 'empresa');
+    assert.match(joined(messages), /Comidas de Navidad para empresas/);
+    assert.match(joined(messages), /menús oficiales/);
+    assert.match(joined(messages), /desde 55 € \+ IVA/);
+  });
+
+  it('«Quiero ver el menú de Navidad» manda solo ese menú', async () => {
+    const messages = await say('34600000104', 'Quiero ver el menú de Navidad');
+    assert.deepEqual(
+      messages.map((message) => message.kind),
+      ['text', 'image']
+    );
+    const body = joined(messages);
+    assert.match(body, /Menú Navidad/);
+    assert.match(body, /25 de diciembre de 2026/);
+    assert.match(body, /65 € por persona/);
+    assert.match(body, /mazapán carmelita/);
+    assert.match(body, /\*Asado:\*/);
+    assert.doesNotMatch(body, /110 € por persona|churros|stracciatella|Menú Nochevieja|Menú Año Nuevo/);
+    assert.match(messages[1].link, /\/menus\/menu-navidad-25dic\.jpg$/);
+    assert.match(messages[1].body, /65 € por persona/);
+    assert.doesNotMatch(body, PERSONAL);
+  });
+
+  it('«Quiero ver el menú de Nochevieja» manda solo ese menú', async () => {
+    const messages = await say('34600000105', 'Quiero ver el menú de Nochevieja');
+    assert.deepEqual(
+      messages.map((message) => message.kind),
+      ['text', 'image']
+    );
+    const body = joined(messages);
+    assert.match(body, /110 € por persona/);
+    assert.match(body, /capuchino de lentejas con perdiz/);
+    assert.match(body, /las 12 uvas de la suerte y churros/);
+    assert.match(body, /\*A medianoche:\*/);
+    assert.doesNotMatch(body, /65 € por persona|mazapán carmelita|stracciatella/);
+    assert.doesNotMatch(body, /\bIVA\b/);
+    assert.match(messages[1].link, /\/menus\/menu-nochevieja-31dic\.jpg$/);
+  });
+
+  it('Año Nuevo manda solo el menú del 1 de enero', async () => {
+    const messages = await say('34600000106', 'Quiero ver el menú de Año Nuevo');
+    const body = joined(messages);
+    assert.match(body, /1 de enero de 2027/);
+    assert.match(body, /65 € por persona/);
+    assert.match(body, /lubina con ajada/);
+    assert.match(body, /cochinillo asado tradicional/);
+    assert.match(body, /\*Pescado del día:\*/);
+    assert.doesNotMatch(body, /110 € por persona|mazapán carmelita/);
+    assert.equal(imagesOf(messages).length, 1);
+    assert.match(messages[1].link, /\/menus\/menu-anonuevo-1ene\.jpg$/);
+    assert.equal(sessions.has('34600000106'), false);
+  });
+
+  it('menús, escrito desde la comida de empresa, enseña la carta y sigue el presupuesto', async () => {
+    const phone = '34600000107';
+    const offer = await say(phone, 'menús de Navidad');
+    assert.equal(imagesOf(offer).length, 0);
+    assert.match(joined(offer), /Comidas de Navidad para empresas/);
+    assert.match(joined(offer), /Escribe \*menús\* y te los envío/);
+    assert.doesNotMatch(joined(offer), OLD_OFFER);
+
+    const shown = await say(phone, 'menús');
+    assert.equal(imagesOf(shown).length, 4);
+    assert.match(joined(shown), /mazapán carmelita/);
+    assert.match(joined(shown), /seguimos/);
+    assert.equal(sessions.get(phone).data.flow, 'empresa');
+    assert.equal(sessions.get(phone).data.stage, 'browse');
+
+    const next = await say(phone, 'solicitar');
+    assert.match(joined(next), /empresa/i);
+    assert.equal(sessions.get(phone).data.stage, 'company');
+  });
+
+  it('menu, la habitación, la boda, el congreso y cómo llegar siguen igual', async () => {
+    let messages = await say('34600000108', 'menú');
+    assert.deepEqual(
+      messages[0].buttons.map((button) => button.id),
+      ['exp_rest', 'exp_hotel', 'exp_eventos']
+    );
+    assert.equal(imagesOf(messages).length, 0);
+
+    messages = await say('34600000109', 'quiero una habitación');
+    assert.match(joined(messages), /entrar/);
+    assert.equal(imagesOf(messages).length, 0);
+
+    messages = await say('34600000110', 'quiero una boda');
+    assert.match(joined(messages), /Bodas en/);
+    assert.equal(imagesOf(messages).some((image) => /\/menus\//.test(image.link)), false);
+    assert.doesNotMatch(joined(messages), /65 € por persona|110 € por persona/);
+
+    messages = await say('34600000111', 'queremos un congreso');
+    assert.match(joined(messages), /500 a 700/);
+    assert.equal(imagesOf(messages).some((image) => /\/menus\//.test(image.link)), false);
+
+    messages = await say('34600000112', 'cómo llegar');
+    assert.match(joined(messages), /Cómo llegar/);
+    assert.equal(imagesOf(messages).length, 0);
+  });
+
+  it('«menú nochevieja» no cae en la comida de empresa', async () => {
+    for (const phrase of ['menú nochevieja', 'Menú Nochevieja', 'menú de Navidad']) {
+      assert.equal(menus.isEmpresaTopic(normalize(phrase)), false, phrase);
+      assert.equal(grupos.classifyIncoming(normalize(phrase)), null, phrase);
+    }
+    assert.equal(grupos.classifyIncoming(normalize('menús de Navidad')).kind, 'empresa_overview');
+
+    const messages = await say('34600000120', 'menú nochevieja');
+    const body = joined(messages);
+    assert.match(body, /Menú Nochevieja/);
+    assert.match(body, /110 € por persona/);
+    assert.match(body, /capuchino de lentejas con perdiz/);
+    assert.doesNotMatch(body, /Comidas de Navidad para empresas|menú a medida|desde 55/);
+    assert.doesNotMatch(body, /cuántas personas/i);
+    assert.equal(imagesOf(messages).length, 1);
+    assert.match(imagesOf(messages)[0].link, /menu-nochevieja-31dic\.jpg$/);
+    assert.equal(sessions.has('34600000120'), false);
+  });
+
+  it('«Quiero reservar el menú de Nochevieja (31 de diciembre)» pide personas, nombre y avisa', async () => {
+    const phone = '34600000121';
+    const phrase = 'Quiero reservar el menú de Nochevieja (31 de diciembre)';
+    assert.equal(fiesta.matchReservation(normalize(phrase)), 'nochevieja');
+    assert.equal(menus.isEmpresaTopic(normalize(phrase)), false);
+
+    let messages = await say(phone, phrase);
+    assert.equal(messages[0].kind, 'image');
+    assert.match(messages[0].body, /Menú Nochevieja/);
+    assert.match(messages[0].body, /31 de diciembre de 2026/);
+    assert.match(messages[0].body, /110 € por persona/);
+    assert.match(messages[0].link, /\/menus\/menu-nochevieja-31dic\.jpg$/);
+    assert.equal(messages[1].kind, 'text');
+    assert.match(messages[1].body, /capuchino de lentejas con perdiz/);
+    assert.match(messages[1].body, /110 € por persona/);
+    assert.doesNotMatch(joined(messages), /\bIVA\b|Comidas de Navidad para empresas/);
+    assert.match(messages.at(-1).body, /cuántas personas/i);
+    assert.equal(sessions.get(phone).step, 'PARTY');
+    assert.equal(reservations.length, 0);
+
+    messages = await say(phone, '4');
+    assert.match(joined(messages), /nombre/i);
+    assert.equal(sessions.get(phone).step, 'NAME');
+
+    messages = await say(phone, 'Ana Ruiz');
+    assert.equal(messages[0].kind, 'buttons');
+    assert.match(messages[0].body, /Menú Nochevieja/);
+    assert.match(messages[0].body, /110 € por persona/);
+    assert.match(messages[0].body, /4 personas/);
+    assert.match(messages[0].body, /Ana Ruiz/);
+    assert.equal(reservations.length, 0);
+    assert.equal(sent.filter((message) => message.to === '34699999999').length, 0);
+
+    messages = await say(phone, 'sí', 'confirm_yes');
+    assert.match(joined(messages), /Reserva confirmada/);
+    assert.match(joined(messages), /Menú Nochevieja/);
+    assert.match(joined(messages), /31 de diciembre de 2026/);
+    assert.doesNotMatch(joined(messages), PERSONAL);
+    assert.equal(reservations.length, 1);
+    const saved = reservations[0];
+    assert.equal(saved.type, 'restaurante');
+    assert.equal(saved.date, '2026-12-31');
+    assert.equal(saved.partySize, 4);
+    assert.equal(saved.name, 'Ana Ruiz');
+    assert.equal(saved.phone, phone);
+    assert.match(saved.details, /Menú Nochevieja/);
+    assert.match(saved.details, /110 € por persona/);
+    assert.doesNotMatch(saved.details, /\bIVA\b/);
+    assert.doesNotMatch(saved.details, PERSONAL);
+
+    const admin = sent.filter((message) => message.to === '34699999999');
+    assert.equal(admin.length, 1);
+    assert.match(admin[0].body, /RESTAURANTE — reserva #1/);
+    assert.match(admin[0].body, /Menú Nochevieja/);
+    assert.match(admin[0].body, /110 € por persona/);
+    assert.match(admin[0].body, /Ana Ruiz/);
+    assert.match(admin[0].body, /4 personas/);
+    assert.doesNotMatch(admin[0].body, PERSONAL);
+    assert.equal(sessions.has(phone), false);
+  });
+
+  it('si la imagen no sale, el texto del menú sí llega', async () => {
+    failImages = true;
+    const errors = [];
+    const original = console.error;
+    console.error = (...args) => errors.push(args.map(String).join(' '));
+    try {
+      const messages = await say('34600000113', 'Quiero ver el menú de Nochevieja');
+      assert.equal(imagesOf(messages).length, 0);
+      assert.match(joined(messages), /110 € por persona/);
+      assert.match(joined(messages), /granizado de champagne/);
+      assert.ok(errors.some((line) => /\[fotos\]/.test(line)));
+    } finally {
+      console.error = original;
+    }
   });
 });

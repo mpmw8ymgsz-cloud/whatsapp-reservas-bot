@@ -5,6 +5,7 @@ const config = require('./config');
 const wa = require('./whatsapp');
 const marketing = require('./marketing');
 const { privacyHtml } = require('./privacyPage');
+const menusPaginas = require('./menusPaginas');
 
 function extractText(message) {
   if (message.type === 'image') return (message.image && message.image.caption) || '';
@@ -317,9 +318,24 @@ function renderAdminPage({ businessName, confirmed, pending, statuses }) {
 function createApp(onMessage, deps = {}) {
   const app = express();
   app.use(express.json());
+  app.get(['/menus', '/menus/'], (req, res) => {
+    res.type('html').send(menusPaginas.indexHtml());
+  });
+  app.get('/menus/:slug', (req, res, next) => {
+    const html = menusPaginas.menuHtml(req.params.slug);
+    if (!html) return next();
+    res.type('html').send(html);
+  });
   app.use(
     '/fotos',
     express.static(path.join(__dirname, '..', 'public', 'fotos'), {
+      index: false,
+      maxAge: '7d',
+    })
+  );
+  app.use(
+    '/menus',
+    express.static(path.join(__dirname, '..', 'public', 'menus'), {
       index: false,
       maxAge: '7d',
     })
