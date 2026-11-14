@@ -171,7 +171,8 @@ function blocksWedding(norm) {
 function isBodaTopic(norm) {
   if (!norm) return false;
   if (blocksWedding(norm)) return false;
-  if (norm === 'quiero informacion para mi boda' || norm.includes('quiero informacion para mi boda')) return true;
+  const collapsed = String(norm).replace(/\s+/g, ' ').trim();
+  if (collapsed.includes('quiero informacion para mi boda')) return true;
   if (/\bbodas?\b/.test(norm)) return true;
   if (/\bprebodas?\b|\bpostbodas?\b/.test(norm)) return true;
   if (/\baniversario de boda\b/.test(norm)) return true;

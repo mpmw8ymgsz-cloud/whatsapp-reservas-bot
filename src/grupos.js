@@ -4,6 +4,7 @@ const menus = require('./menusEmpresa');
 const conocimiento = require('./eventosConocimiento');
 const faq = require('./faqLlegada');
 const fotos = require('./fotos');
+const weddingSources = require('./weddingSources');
 
 const MONTHS = {
   enero: 1,
@@ -80,7 +81,7 @@ function startBoda(business, options = {}) {
   if (options.withPhotos !== false) replies.push(...fotos.presentationReplies('boda'));
   replies.push(text(datePrompt()));
   return {
-    data: base('boda', 'wdate'),
+    data: base('boda', 'wdate', { source: weddingSources.sourceForWeddingStart(options.text) }),
     replies,
   };
 }
@@ -584,7 +585,7 @@ function wantsCongresoNow(data, norm, buttonId) {
 }
 
 function beginBoda(business, raw, norm) {
-  const started = startBoda(business);
+  const started = startBoda(business, { text: raw });
   const location = faq.isLocationQuery(norm);
   const transport = faq.isTransportQuery(norm);
   if (transport) started.data.transporte = true;
@@ -624,7 +625,7 @@ function wantsEmpresaBooking(norm, buttonId) {
 
 function handleBrowse(data, raw, norm, buttonId, business) {
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
-  if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business);
+  if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business, { text: raw });
   if (buttonId === 'emp_overview' || buttonId === 'emp_menus') return startOverview(business);
   if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
   const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
@@ -641,7 +642,7 @@ function handleBrowse(data, raw, norm, buttonId, business) {
 }
 
 function handleHub(data, raw, norm, buttonId, business) {
-  if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business);
+  if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business, { text: raw });
   if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
   if (buttonId === 'emp_menus' || menus.isEmpresaTopic(norm)) return startOverview(business);
   const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
@@ -972,7 +973,7 @@ function handle(ctx) {
   if (wantsCongresoNow(data, norm, buttonId)) return startCongreso(business);
 
   if (!data.stage) {
-    if (buttonId === 'boda_start') return startBoda(business);
+    if (buttonId === 'boda_start') return startBoda(business, { text: raw });
     if (buttonId === 'cong_start') return startCongreso(business);
     if (
       buttonId === 'emp_menus' ||
@@ -998,7 +999,7 @@ function handle(ctx) {
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
   if (buttonId === 'emp_fix' || (data.stage === 'review' && /corregir|repetir|cambiar/.test(norm))) {
     if (data.flow === 'boda') {
-      return stay({ flow: 'boda', stage: 'wdate' }, [
+      return stay({ flow: 'boda', stage: 'wdate', source: data.source || weddingSources.DIRECT_SOURCE }, [
         text(`De acuerdo, lo repetimos. ${datePrompt()}`),
       ]);
     }

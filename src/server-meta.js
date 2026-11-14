@@ -6,6 +6,7 @@ const wa = require('./whatsapp');
 const marketing = require('./marketing');
 const { privacyHtml } = require('./privacyPage');
 const menusPaginas = require('./menusPaginas');
+const weddingSources = require('./weddingSources');
 
 function extractText(message) {
   if (message.type === 'image') return (message.image && message.image.caption) || '';
@@ -262,10 +263,64 @@ async function loadAdminPageData() {
   } catch (err) {
     console.error('Error cargando estados de envío:', err);
   }
-  return { confirmed, pending, rejected, statuses };
+  let wedding = null;
+  try {
+    if (typeof db.weddingStats === 'function') {
+      const zone = config.business.timezone || 'Europe/Madrid';
+      const today = DateTime.now().setZone(zone).startOf('day');
+      const to = today.toFormat('yyyy-MM-dd');
+      wedding = {
+        week: await db.weddingStats({ from: today.minus({ days: 6 }).toFormat('yyyy-MM-dd'), to, zone }),
+        month: await db.weddingStats({ from: today.minus({ days: 29 }).toFormat('yyyy-MM-dd'), to, zone }),
+      };
+    }
+  } catch (err) {
+    console.error('Error cargando estadísticas de bodas:', err.message || err);
+  }
+  return { confirmed, pending, rejected, statuses, wedding };
 }
 
-function renderAdminPage({ businessName, confirmed, pending, rejected, statuses, adminKey }) {
+function weddingCountCells(row) {
+  return weddingSources.COUNT_KEYS.map((key) => `<td>${esc(row[key])}</td>`).join('');
+}
+
+function weddingTable(stats) {
+  if (!stats) return '';
+  const head =
+    '<tr><th>Origen</th><th>Leads</th><th>Fotos</th><th>Más fotos</th><th>Fecha</th><th>Invitados</th>' +
+    '<th>Ceremonia</th><th>Alojamiento</th><th>Nombre</th><th>Piden visita</th><th>Confirmadas</th><th>Rechazadas</th></tr>';
+  const body = (stats.bySource || [])
+    .map((row) => `<tr><td>${esc(row.label || weddingSources.labelFor(row.source))}</td>${weddingCountCells(row)}</tr>`)
+    .join('');
+  const totals = stats.totals || {};
+  return (
+    `<table>${head}${body}` +
+    `<tr><td><strong>Total</strong></td>${weddingCountCells(totals)}</tr></table>`
+  );
+}
+
+function weddingSection(wedding) {
+  if (!wedding || !wedding.week || !wedding.month) return '';
+  const questions = (wedding.month.questions || []).slice(0, 10);
+  const items = questions
+    .map((question) => weddingSources.publicQuestion(question.text))
+    .filter(Boolean)
+    .map((text) => `<li>${esc(text)}</li>`)
+    .join('');
+  return (
+    `<h2>Bodas por origen</h2>` +
+    `<p>Cada pareja cuenta en el portal del primer mensaje, y aquí se ve hasta dónde llegó. La etiqueta no se le enseña al cliente.</p>` +
+    `<h3>Últimos 7 días · ${esc(wedding.week.from)} a ${esc(wedding.week.to)}</h3>` +
+    weddingTable(wedding.week) +
+    `<h3>Últimos 30 días · ${esc(wedding.month.from)} a ${esc(wedding.month.to)}</h3>` +
+    weddingTable(wedding.month) +
+    `<h3>Últimas preguntas</h3>` +
+    `<p>Las de los últimos 30 días, sin teléfonos. El listado completo está en /admin/wedding-stats.</p>` +
+    (items ? `<ul>${items}</ul>` : '<p>Sin preguntas en los últimos 30 días.</p>')
+  );
+}
+
+function renderAdminPage({ businessName, confirmed, pending, rejected, statuses, adminKey, wedding }) {
   const confirmedRows = confirmed
     .map(
       (r) =>
@@ -373,6 +428,7 @@ function renderAdminPage({ businessName, confirmed, pending, rejected, statuses,
     <tr><th>Cuándo</th><th>Destinatario</th><th>Estado</th><th>Error</th><th>Id</th></tr>
     ${statusRows || '<tr><td colspan="5">Sin estados de envío</td></tr>'}
   </table>
+  ${weddingSection(wedding)}
 </body></html>`;
 }
 
@@ -440,6 +496,32 @@ function createApp(onMessage, deps = {}) {
       await processWebhook(req.body, { onMessage, saveMessageStatus, markRead });
     } catch (err) {
       console.error('Error procesando webhook:', err?.response?.data || err);
+    }
+  });
+
+  app.get('/admin/wedding-stats', async (req, res) => {
+    if (!adminAuthorized(req)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Acceso denegado. Falta la clave (cabecera x-admin-key o ?key=).',
+      });
+    }
+    const from = req.query.from == null ? '' : String(req.query.from);
+    const to = req.query.to == null ? '' : String(req.query.to);
+    try {
+      const stats = await require('./db').weddingStats({
+        from,
+        to,
+        zone: config.business.timezone || 'Europe/Madrid',
+      });
+      res.json({ ok: true, ...stats });
+    } catch (err) {
+      const status = err.statusCode === 400 ? 400 : 500;
+      if (status === 500) console.error('Error en /admin/wedding-stats:', err);
+      res.status(status).json({
+        ok: false,
+        error: status === 400 ? err.message : 'Error cargando las estadísticas de bodas',
+      });
     }
   });
 

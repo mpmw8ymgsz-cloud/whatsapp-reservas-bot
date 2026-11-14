@@ -10,6 +10,7 @@ const {
   adminDelivered,
   adminNotDelivered,
   decisionResult,
+  isWeddingVisitRequest,
 } = require('./confirmacion');
 
 function customerText(row, status) {
@@ -89,6 +90,16 @@ async function applyDecision({ id, action, reason } = {}) {
       id: targetId,
       code: String(targetId),
     });
+  }
+
+  if (row.type === 'evento_boda' && isWeddingVisitRequest(row.details)) {
+    try {
+      if (typeof db.setWeddingVisitDecision === 'function') {
+        await db.setWeddingVisitDecision(row.phone, status === 'rejected' ? 'rejected' : 'confirmed');
+      }
+    } catch (err) {
+      console.error('[boda] no se pudo anotar la decisión de la visita:', err.message);
+    }
   }
 
   const view = {

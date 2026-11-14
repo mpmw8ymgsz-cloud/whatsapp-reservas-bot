@@ -175,6 +175,10 @@ function visitSummary(details) {
   return `Visita: ${value}`;
 }
 
+function isWeddingVisitRequest(details) {
+  return visitSummary(details) !== '';
+}
+
 function summaryLines(row) {
   const lines = [...kindLines(row)];
   const company = detailField(row.details, 'Empresa');
@@ -296,6 +300,7 @@ module.exports = {
   customerPending,
   customerConfirmed,
   customerRejected,
+  isWeddingVisitRequest,
   adminInstructions,
   adminHelp,
   adminDelivered,

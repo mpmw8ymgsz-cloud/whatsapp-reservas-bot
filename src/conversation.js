@@ -10,6 +10,7 @@ const marketing = require('./marketing');
 const fotos = require('./fotos');
 const menusFiesta = require('./menusFiesta');
 const confirmacion = require('./confirmacion');
+const weddingSources = require('./weddingSources');
 const { applyDecision } = require('./reservasDecision');
 
 const B = config.business;
@@ -157,7 +158,7 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
     !buttonId &&
     fotos.isMoreWeddingPhotos(normText)
   ) {
-    return sendMoreWeddingPhotos(from, session);
+    return sendMoreWeddingPhotos(from, session, text);
   }
 
   const askingPhotos = !buttonId && fotos.matchPhotoRequest(normText);
@@ -174,7 +175,8 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
     const data = session.step === STEP.GRUPO ? session.data : {};
     return dispatchGrupo(
       from,
-      grupos.handle({ data, text, buttonId: routedButton, from, zone: B.timezone, business: B })
+      grupos.handle({ data, text, buttonId: routedButton, from, zone: B.timezone, business: B }),
+      { text, buttonId: routedButton }
     );
   }
 
@@ -198,10 +200,10 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
         inFlow: withLead || session.step !== STEP.IDLE,
       });
       if (withLead) {
-        const started = grupos.startIntent(intent, B);
+        const started = grupos.startIntent(intent, B, { text });
         if (transport) started.data.transporte = true;
         started.replies = [{ kind: 'text', body }, ...started.replies];
-        return dispatchGrupo(from, started);
+        return dispatchGrupo(from, started, { text, buttonId });
       }
       const tail = session.step === STEP.IDLE ? '' : '\n\nCuando quieras seguimos con lo que estábamos apuntando.';
       await wa.sendText(from, body + tail);
@@ -215,7 +217,7 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
 
   if (session.step !== STEP.NAME) {
     const intent = grupos.classifyIncoming(normText);
-    if (intent) return dispatchGrupo(from, grupos.startIntent(intent, B));
+    if (intent) return dispatchGrupo(from, grupos.startIntent(intent, B, { text }), { text, buttonId });
     if (marketing.isPresupuestoText(normText)) {
       return dispatchGrupo(
         from,
@@ -749,32 +751,70 @@ async function acknowledgeMarketingOptOut(from, reason) {
   await wa.sendText(from, marketing.OPT_OUT_ACK);
 }
 
-async function dispatchGrupo(from, result) {
-  if (!result) return;
-  if (result.goHome) return showMenu(from);
-  if (result.customerName) await db.upsertCustomerName(from, result.customerName);
-
-  if (result.reservation) {
-    let id;
-    try {
-      id = await db.createReservation(result.reservation.record);
-    } catch (err) {
-      console.error('[eventos] No se pudo guardar la solicitud:', err.message);
-      await wa.sendText(
-        from,
-        `No he podido anotar la solicitud ahora mismo. Llámanos al ${B.phone} y la tomamos por teléfono.`
-      );
-      return;
-    }
-    await db.clearSession(from);
-    await sendReplies(from, grupos.stampId(result.replies, id));
-    await notifyAdminOfBudget(id, result.reservation);
+async function noteWeddingTurn(from, input) {
+  const canLead = typeof db.touchWeddingLead === 'function';
+  const canQuestion = typeof db.addWeddingQuestion === 'function';
+  if (!canLead && !canQuestion) return;
+  let update;
+  try {
+    update = weddingSources.turnUpdate(input);
+  } catch (err) {
+    console.error('[boda] no se pudo leer el seguimiento:', err.message);
     return;
   }
+  if (!update || (!update.lead && !update.question)) return;
+  try {
+    if (update.lead && canLead) await db.touchWeddingLead(from, update.lead);
+    if (update.question && canQuestion) await db.addWeddingQuestion(from, update.question);
+  } catch (err) {
+    console.error('[boda] no se pudo guardar el seguimiento:', err.message);
+  }
+}
 
-  if (result.clear) await db.clearSession(from);
-  else if (result.data) await db.setSession(from, STEP.GRUPO, result.data);
-  await sendReplies(from, result.replies || []);
+async function dispatchGrupo(from, result, ctx) {
+  if (!result) return;
+  let before = null;
+  try {
+    if (typeof db.getSession === 'function') before = await db.getSession(from);
+  } catch (err) {
+    before = null;
+  }
+  try {
+    if (result.goHome) return showMenu(from);
+    if (result.customerName) await db.upsertCustomerName(from, result.customerName);
+
+    if (result.reservation) {
+      let id;
+      try {
+        id = await db.createReservation(result.reservation.record);
+      } catch (err) {
+        console.error('[eventos] No se pudo guardar la solicitud:', err.message);
+        await wa.sendText(
+          from,
+          `No he podido anotar la solicitud ahora mismo. Llámanos al ${B.phone} y la tomamos por teléfono.`
+        );
+        return;
+      }
+      await db.clearSession(from);
+      await sendReplies(from, grupos.stampId(result.replies, id));
+      await notifyAdminOfBudget(id, result.reservation);
+      return;
+    }
+
+    if (result.clear) await db.clearSession(from);
+    else if (result.data) await db.setSession(from, STEP.GRUPO, result.data);
+    await sendReplies(from, result.replies || []);
+  } finally {
+    const context = ctx || {};
+    await noteWeddingTurn(from, {
+      before,
+      result,
+      text: context.text,
+      buttonId: context.buttonId,
+      sawPhotos: context.sawPhotos,
+      askedMorePhotos: context.askedMorePhotos,
+    });
+  }
 }
 
 function formatSendError(err) {
@@ -995,12 +1035,19 @@ async function sendHolidayMenus(from, which, session) {
   await db.clearSession(from);
 }
 
-async function sendMoreWeddingPhotos(from, session) {
+async function sendMoreWeddingPhotos(from, session, text) {
   await deliverPhotos(from, fotos.moreWeddingReplies());
   await sendReplies(from, [
     { kind: 'text', body: 'Aquí van más fotos de bodas en la casa.' },
     ...grupos.promptReplies(session.data, B),
   ]);
+  await noteWeddingTurn(from, {
+    before: session,
+    result: { data: session.data },
+    text,
+    askedMorePhotos: true,
+    sawPhotos: true,
+  });
 }
 
 async function sendPhotoTour(from, norm, session) {
@@ -1012,7 +1059,10 @@ async function sendPhotoTour(from, norm, session) {
   }
   const intent = grupos.classifyIncoming(norm);
   if (intent && intent.kind === 'boda') {
-    return dispatchGrupo(from, grupos.startBoda(B, { withPhotos: false }));
+    return dispatchGrupo(from, grupos.startBoda(B, { withPhotos: false, text: norm }), {
+      text: norm,
+      sawPhotos: true,
+    });
   }
   if (intent && intent.kind === 'congreso') {
     return dispatchGrupo(from, grupos.startCongreso(B, { withPhotos: false }));
