@@ -1,5 +1,6 @@
 const axios = require('axios');
 const config = require('./config');
+const weddingSources = require('./weddingSources');
 
 const baseUrl = config.tursoUrl.replace(/^libsql:\/\//, 'https://');
 
@@ -101,6 +102,28 @@ const ready = (async () => {
     error_title TEXT,
     error_detail TEXT,
     ts TEXT
+  )`);
+  // Una fila por teléfono. El origen y la hora son los del primer contacto; los pasos solo suben.
+  await execute(`CREATE TABLE IF NOT EXISTS wedding_leads (
+    phone TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    first_contact_at TEXT NOT NULL,
+    saw_photos INTEGER NOT NULL DEFAULT 0,
+    asked_more_photos INTEGER NOT NULL DEFAULT 0,
+    gave_date INTEGER NOT NULL DEFAULT 0,
+    gave_guests INTEGER NOT NULL DEFAULT 0,
+    gave_ceremony INTEGER NOT NULL DEFAULT 0,
+    gave_accommodation INTEGER NOT NULL DEFAULT 0,
+    gave_name INTEGER NOT NULL DEFAULT 0,
+    visit_requested INTEGER NOT NULL DEFAULT 0,
+    visit_decision TEXT,
+    updated_at TEXT NOT NULL
+  )`);
+  await execute(`CREATE TABLE IF NOT EXISTS wedding_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT NOT NULL,
+    question TEXT NOT NULL,
+    asked_at TEXT NOT NULL
   )`);
 })().catch((err) => {
   console.error('Error inicializando la base de datos en Turso:', err.message);
@@ -332,6 +355,127 @@ module.exports = {
         ts != null && ts !== '' ? String(ts) : null,
       ]
     );
+  },
+
+  async touchWeddingLead(phone, { source, steps = {}, at } = {}) {
+    await ready;
+    const id = phoneDigits(phone);
+    if (!id) return;
+    const now = at || new Date().toISOString();
+    const bit = (value) => (value ? 1 : 0);
+    await execute(
+      `INSERT INTO wedding_leads (
+         phone, source, first_contact_at,
+         saw_photos, asked_more_photos, gave_date, gave_guests, gave_ceremony,
+         gave_accommodation, gave_name, visit_requested, visit_decision, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+       ON CONFLICT(phone) DO UPDATE SET
+         updated_at = excluded.updated_at,
+         saw_photos = MAX(wedding_leads.saw_photos, excluded.saw_photos),
+         asked_more_photos = MAX(wedding_leads.asked_more_photos, excluded.asked_more_photos),
+         gave_date = MAX(wedding_leads.gave_date, excluded.gave_date),
+         gave_guests = MAX(wedding_leads.gave_guests, excluded.gave_guests),
+         gave_ceremony = MAX(wedding_leads.gave_ceremony, excluded.gave_ceremony),
+         gave_accommodation = MAX(wedding_leads.gave_accommodation, excluded.gave_accommodation),
+         gave_name = MAX(wedding_leads.gave_name, excluded.gave_name),
+         visit_requested = MAX(wedding_leads.visit_requested, excluded.visit_requested)`,
+      [
+        id,
+        source || weddingSources.DIRECT_SOURCE,
+        now,
+        bit(steps.sawPhotos),
+        bit(steps.askedMorePhotos),
+        bit(steps.gaveDate),
+        bit(steps.gaveGuests),
+        bit(steps.gaveCeremony),
+        bit(steps.gaveAccommodation),
+        bit(steps.gaveName),
+        bit(steps.visitRequested),
+        now,
+      ]
+    );
+  },
+
+  async setWeddingVisitDecision(phone, decision) {
+    await ready;
+    const id = phoneDigits(phone);
+    if (!id || (decision !== 'confirmed' && decision !== 'rejected')) return false;
+    const now = new Date().toISOString();
+    await execute(
+      `INSERT INTO wedding_leads (
+         phone, source, first_contact_at,
+         saw_photos, asked_more_photos, gave_date, gave_guests, gave_ceremony,
+         gave_accommodation, gave_name, visit_requested, visit_decision, updated_at
+       ) VALUES (?, 'directo', ?, 0, 0, 0, 0, 0, 0, 0, 1, ?, ?)
+       ON CONFLICT(phone) DO UPDATE SET
+         visit_decision = excluded.visit_decision,
+         visit_requested = 1,
+         updated_at = excluded.updated_at`,
+      [id, now, decision, now]
+    );
+    return true;
+  },
+
+  async addWeddingQuestion(phone, question, at) {
+    await ready;
+    const id = phoneDigits(phone);
+    const text = String(question || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (!id || text.length < 2) return;
+    await execute(`INSERT INTO wedding_questions (phone, question, asked_at) VALUES (?, ?, ?)`, [
+      id,
+      text,
+      at || new Date().toISOString(),
+    ]);
+  },
+
+  async getWeddingLead(phone) {
+    await ready;
+    const id = phoneDigits(phone);
+    if (!id) return null;
+    const result = await execute('SELECT * FROM wedding_leads WHERE phone = ?', [id]);
+    return rowsToObjects(result)[0] || null;
+  },
+
+  async weddingStats({ from, to, zone } = {}) {
+    await ready;
+    const bounds = weddingSources.dateBounds(from, to, zone || config.business.timezone || 'Europe/Madrid');
+    if (!bounds) {
+      const error = new Error('Indica from y to como YYYY-MM-DD, con from anterior o igual a to.');
+      error.statusCode = 400;
+      throw error;
+    }
+    const grouped = await execute(
+      `SELECT source,
+              COUNT(*) AS leads,
+              SUM(saw_photos) AS saw_photos,
+              SUM(asked_more_photos) AS asked_more_photos,
+              SUM(gave_date) AS gave_date,
+              SUM(gave_guests) AS gave_guests,
+              SUM(gave_ceremony) AS gave_ceremony,
+              SUM(gave_accommodation) AS gave_accommodation,
+              SUM(gave_name) AS gave_name,
+              SUM(visit_requested) AS visit_requests,
+              SUM(CASE WHEN visit_decision = 'confirmed' THEN 1 ELSE 0 END) AS visits_confirmed,
+              SUM(CASE WHEN visit_decision = 'rejected' THEN 1 ELSE 0 END) AS visits_rejected
+       FROM wedding_leads
+       WHERE first_contact_at >= ? AND first_contact_at <= ?
+       GROUP BY source`,
+      [bounds.start, bounds.end]
+    );
+    const questions = await execute(
+      `SELECT question, asked_at
+       FROM wedding_questions
+       WHERE asked_at >= ? AND asked_at <= ?
+       ORDER BY id DESC
+       LIMIT 50`,
+      [bounds.start, bounds.end]
+    );
+    return weddingSources.shapeWeddingStats({
+      from,
+      to,
+      rows: rowsToObjects(grouped),
+      questions: rowsToObjects(questions),
+    });
   },
 
   async listMessageStatuses({ wamid, phone, limit = 50 } = {}) {
