@@ -7,6 +7,7 @@ const marketing = require('./marketing');
 const { privacyHtml } = require('./privacyPage');
 const menusPaginas = require('./menusPaginas');
 const weddingSources = require('./weddingSources');
+const conversationLog = require('./conversationLog');
 
 function extractText(message) {
   if (message.type === 'image') return (message.image && message.image.caption) || '';
@@ -223,6 +224,8 @@ async function processWebhook(body, deps) {
   }
 
   const from = message.from;
+  const text = extractText(message);
+  const buttonId = extractButtonId(message);
   console.log(`[webhook] Mensaje de ${from}, tipo ${message.type}`);
   try {
     Promise.resolve(markRead(message.id)).catch((err) =>
@@ -231,7 +234,26 @@ async function processWebhook(body, deps) {
   } catch (err) {
     console.error('Error marcando como leído:', err.message);
   }
-  await deps.onMessage(from, extractText(message), extractButtonId(message), message);
+  const recordInbound = deps.recordInbound || ((entry) => conversationLog.recordInbound(entry));
+  const syncConversation = deps.syncConversation || ((phone, body, id) => conversationLog.syncAfterTurn(phone, body, id));
+  try {
+    await recordInbound({
+      phone: from,
+      body: text,
+      msgType: message.type || 'unknown',
+      buttonId,
+      profileName: conversationLog.profileName(value, from),
+      at: conversationLog.timestampFrom(message),
+    });
+  } catch (err) {
+    console.error('[conversacion] no se pudo guardar la entrada:', err?.message || err);
+  }
+  await deps.onMessage(from, text, buttonId, message);
+  try {
+    await syncConversation(from, text, buttonId);
+  } catch (err) {
+    console.error('[conversacion] no se pudo actualizar el tema:', err?.message || err);
+  }
   console.log(`[webhook] Procesado y respondido a ${from}`);
 }
 
@@ -409,6 +431,7 @@ function renderAdminPage({ businessName, confirmed, pending, rejected, statuses,
 <body>
   <h1>Reservas próximos 30 días · ${esc(businessName)}</h1>
   <p>${confirmedLabel}. Actualiza la página para refrescar.</p>
+  <p>El historial de chats (solo con esta clave) está en <a href="/admin/conversations${adminKey ? `?key=${esc(encodeURIComponent(adminKey))}` : ''}">/admin/conversations</a>.</p>
   <table>
     <tr><th>Nº</th><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Nombre</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th></tr>
     ${confirmedRows || '<tr><td colspan="8">Sin reservas próximas</td></tr>'}
@@ -474,7 +497,28 @@ function createApp(onMessage, deps = {}) {
   const decideReservation =
     deps.decideReservation || ((args) => require('./reservasDecision').applyDecision(args));
   const loadAdmin = deps.loadAdmin;
+  const conversationAdmin = deps.conversationAdmin || {
+    list: (query) => conversationLog.listForAdmin(query),
+    stats: (query) => conversationLog.statsForAdmin(query),
+    transcript: (phone) => conversationLog.transcriptForAdmin(phone),
+  };
   let campaignInFlight = false;
+
+  function denyAdmin(res) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Acceso denegado. Falta la clave (cabecera x-admin-key o ?key=).',
+    });
+  }
+
+  function conversationError(res, err, fallback) {
+    const status = err && err.statusCode === 400 ? 400 : 500;
+    if (status === 500) console.error(`[conversacion] ${fallback}:`, err?.message || err);
+    return res.status(status).json({
+      ok: false,
+      error: status === 400 ? err.message : fallback,
+    });
+  }
 
   app.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -496,6 +540,36 @@ function createApp(onMessage, deps = {}) {
       await processWebhook(req.body, { onMessage, saveMessageStatus, markRead });
     } catch (err) {
       console.error('Error procesando webhook:', err?.response?.data || err);
+    }
+  });
+
+  app.get('/admin/conversations', async (req, res) => {
+    if (!adminAuthorized(req)) return denyAdmin(res);
+    try {
+      const data = await conversationAdmin.list({ from: req.query.from, to: req.query.to });
+      res.json({ ok: true, ...data });
+    } catch (err) {
+      conversationError(res, err, 'Error cargando las conversaciones');
+    }
+  });
+
+  app.get('/admin/conversation-stats', async (req, res) => {
+    if (!adminAuthorized(req)) return denyAdmin(res);
+    try {
+      const data = await conversationAdmin.stats({ from: req.query.from, to: req.query.to });
+      res.json({ ok: true, ...data });
+    } catch (err) {
+      conversationError(res, err, 'Error cargando las estadísticas');
+    }
+  });
+
+  app.get('/admin/conversations/:phone', async (req, res) => {
+    if (!adminAuthorized(req)) return denyAdmin(res);
+    try {
+      const data = await conversationAdmin.transcript(req.params.phone);
+      res.json({ ok: true, ...data });
+    } catch (err) {
+      conversationError(res, err, 'Error cargando la conversación');
     }
   });
 

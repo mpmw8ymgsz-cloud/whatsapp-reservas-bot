@@ -125,6 +125,31 @@ const ready = (async () => {
     question TEXT NOT NULL,
     asked_at TEXT NOT NULL
   )`);
+  await execute(`CREATE TABLE IF NOT EXISTS conversations (
+    phone TEXT PRIMARY KEY,
+    profile_name TEXT,
+    source TEXT,
+    source_locked INTEGER NOT NULL DEFAULT 0,
+    topic TEXT,
+    outcome TEXT NOT NULL DEFAULT 'abierta',
+    first_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    message_count INTEGER NOT NULL DEFAULT 0
+  )`);
+  await execute(`CREATE TABLE IF NOT EXISTS conversation_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    body TEXT,
+    msg_type TEXT,
+    topic TEXT,
+    profile_name TEXT,
+    at TEXT NOT NULL
+  )`);
+  await execute(
+    `CREATE INDEX IF NOT EXISTS idx_conv_messages_phone ON conversation_messages(phone, id)`
+  );
+  await execute(`CREATE INDEX IF NOT EXISTS idx_conv_messages_at ON conversation_messages(at)`);
 })().catch((err) => {
   console.error('Error inicializando la base de datos en Turso:', err.message);
   throw err;
@@ -505,5 +530,149 @@ module.exports = {
       args
     );
     return rowsToObjects(result);
+  },
+
+  async getConversation(phone) {
+    await ready;
+    const id = phoneDigits(phone);
+    if (!id) return null;
+    const result = await execute('SELECT * FROM conversations WHERE phone = ?', [id]);
+    return rowsToObjects(result)[0] || null;
+  },
+
+  async getConversationsByPhones(phones) {
+    await ready;
+    const ids = [...new Set((phones || []).map(phoneDigits).filter(Boolean))];
+    const rows = [];
+    for (let i = 0; i < ids.length; i += 80) {
+      const chunk = ids.slice(i, i + 80);
+      const slots = chunk.map(() => '?').join(', ');
+      const result = await execute(`SELECT * FROM conversations WHERE phone IN (${slots})`, chunk);
+      rows.push(...rowsToObjects(result));
+    }
+    return rows;
+  },
+
+  async saveConversationTurn({
+    phone,
+    direction,
+    body,
+    msgType,
+    messageTopic,
+    conversationTopic,
+    profileName,
+    at,
+    sourceCandidate,
+  }) {
+    await ready;
+    const id = phoneDigits(phone);
+    if (!id) return;
+    const when = at || new Date().toISOString();
+    const existing = await this.getConversation(id);
+    const inbound = direction === 'in';
+    const locked = existing && Number(existing.source_locked) === 1;
+    let source = existing ? existing.source : null;
+    let sourceLocked = locked ? 1 : 0;
+    if (inbound && !locked) {
+      source = sourceCandidate || null;
+      sourceLocked = 1;
+    }
+    const topic = conversationTopic || (existing && existing.topic) || messageTopic || 'general';
+    const profile =
+      inbound && profileName
+        ? String(profileName).slice(0, 120)
+        : existing && existing.profile_name
+          ? existing.profile_name
+          : null;
+    const firstAt = existing && existing.first_at ? existing.first_at : when;
+    const lastAt = existing && existing.last_at && existing.last_at > when ? existing.last_at : when;
+    const count = (existing ? Number(existing.message_count) || 0 : 0) + 1;
+    const outcome = existing && existing.outcome ? existing.outcome : 'abierta';
+    if (!existing) {
+      await execute(
+        `INSERT INTO conversations (
+           phone, profile_name, source, source_locked, topic, outcome, first_at, last_at, message_count
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, profile, source, sourceLocked, topic, outcome, firstAt, lastAt, count]
+      );
+    } else {
+      await execute(
+        `UPDATE conversations
+         SET profile_name = ?, source = ?, source_locked = ?, topic = ?, last_at = ?, message_count = ?
+         WHERE phone = ?`,
+        [profile, source, sourceLocked, topic, lastAt, count, id]
+      );
+    }
+    await execute(
+      `INSERT INTO conversation_messages (phone, direction, body, msg_type, topic, profile_name, at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        inbound ? 'in' : 'out',
+        body == null ? '' : String(body).slice(0, 4000),
+        msgType ? String(msgType).slice(0, 40) : null,
+        messageTopic ? String(messageTopic).slice(0, 40) : null,
+        inbound ? profile : null,
+        when,
+      ]
+    );
+  },
+
+  async setConversationTopic(phone, topic) {
+    await ready;
+    const id = phoneDigits(phone);
+    if (!id || !topic) return;
+    await execute('UPDATE conversations SET topic = ? WHERE phone = ?', [String(topic).slice(0, 40), id]);
+  },
+
+  async markConversationOutcome(phone, outcome) {
+    await ready;
+    if (outcome !== 'solicitud' && outcome !== 'escalacion') return;
+    const id = phoneDigits(phone);
+    if (!id) return;
+    const existing = await this.getConversation(id);
+    if (!existing) {
+      const now = new Date().toISOString();
+      await execute(
+        `INSERT INTO conversations (
+           phone, profile_name, source, source_locked, topic, outcome, first_at, last_at, message_count
+         ) VALUES (?, NULL, NULL, 0, 'general', ?, ?, ?, 0)`,
+        [id, outcome, now, now]
+      );
+      return;
+    }
+    if (existing.outcome === 'solicitud') return;
+    if (existing.outcome === 'escalacion' && outcome !== 'solicitud') return;
+    await execute('UPDATE conversations SET outcome = ? WHERE phone = ?', [outcome, id]);
+  },
+
+  async listConversationMessagesBetween(startIso, endIso, limit = 20000) {
+    await ready;
+    const cap = Math.min(Math.max(Number(limit) || 20000, 1), 20000);
+    const result = await execute(
+      `SELECT phone, direction, at, topic
+       FROM conversation_messages
+       WHERE at >= ? AND at <= ?
+       ORDER BY at, id
+       LIMIT ?`,
+      [startIso, endIso, cap]
+    );
+    return rowsToObjects(result);
+  },
+
+  async listConversationTranscript(phone, limit = 1000) {
+    await ready;
+    const id = phoneDigits(phone);
+    if (!id) return [];
+    const cap = Math.min(Math.max(Number(limit) || 1000, 1), 1000);
+    const result = await execute(
+      `SELECT id, direction, body, msg_type, topic, profile_name, at
+       FROM conversation_messages
+       WHERE phone = ?
+       ORDER BY at DESC, id DESC
+       LIMIT ?`,
+      [id, cap]
+    );
+    return rowsToObjects(result).reverse();
   },
 };

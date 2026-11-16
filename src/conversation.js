@@ -805,6 +805,7 @@ async function dispatchGrupo(from, result, ctx) {
       let id;
       try {
         id = await db.createReservation(result.reservation.record);
+        await noteConversationOutcome(from, 'solicitud');
       } catch (err) {
         console.error('[eventos] No se pudo guardar la solicitud:', err.message);
         await wa.sendText(
@@ -1035,6 +1036,7 @@ async function finishPendingReservation(from, fields) {
     details: fields.details,
     status: 'pending',
   });
+  await noteConversationOutcome(from, 'solicitud');
   await db.clearSession(from);
   await wa.sendText(
     from,
@@ -1080,6 +1082,15 @@ async function notifyAdminText(id, body, request) {
   });
 }
 
+async function noteConversationOutcome(phone, outcome) {
+  if (typeof db.markConversationOutcome !== 'function') return;
+  try {
+    await db.markConversationOutcome(phone, outcome);
+  } catch (err) {
+    console.error('[conversacion] no se pudo anotar el cierre:', err.message);
+  }
+}
+
 async function notifyAdminEscalation(request) {
   const whatsapp = await sendAdminWhatsapp(request.id, request.whatsappBody);
   await deliverRequestEmail({
@@ -1087,6 +1098,7 @@ async function notifyAdminEscalation(request) {
     whatsappOk: whatsapp.ok,
     whatsappSkipped: whatsapp.skipped,
   });
+  if (request && request.kind === 'error') await noteConversationOutcome(request.phone, 'escalacion');
 }
 
 async function confirmMenuReservation(from, session) {
