@@ -44,6 +44,50 @@ describe('config.adminAlertTemplate', () => {
   });
 });
 
+function readConfig(expression, overrides = {}) {
+  const env = { ...process.env };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+  const result = spawnSync(process.execPath, ['-e', `process.stdout.write(String(${expression}))`], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+}
+
+describe('config de avisos por correo', () => {
+  const cleared = {
+    ALERT_EMAIL: undefined,
+    ALERT_EMAIL_FROM: undefined,
+    ALERT_EMAIL_FROM_NAME: undefined,
+    BREVO_API_KEY: undefined,
+  };
+
+  it('usa reservas@donfadrique.com si no hay destinatario ni remitente', () => {
+    assert.equal(readConfig("require('./src/config').alertEmail", cleared), 'reservas@donfadrique.com');
+    assert.equal(readConfig("require('./src/config').alertEmailFrom", cleared), 'reservas@donfadrique.com');
+    assert.equal(readConfig("require('./src/config').alertEmailFromName", cleared), 'Hostería Don Fadrique');
+    assert.equal(readConfig("require('./src/config').brevoApiKey", cleared), '');
+  });
+
+  it('recorta las variables y deja el valor que se configure', () => {
+    assert.equal(
+      readConfig("require('./src/config').alertEmail", { ALERT_EMAIL: '  equipo@ejemplo.com  ' }),
+      'equipo@ejemplo.com'
+    );
+    assert.equal(
+      readConfig("require('./src/config').alertEmailFrom", { ALERT_EMAIL_FROM: ' avisos@ejemplo.com ' }),
+      'avisos@ejemplo.com'
+    );
+    assert.equal(readConfig("require('./src/config').brevoApiKey", { BREVO_API_KEY: '  xkeysib-test  ' }), 'xkeysib-test');
+    assert.equal(readConfig("require('./src/config').alertEmail", { ALERT_EMAIL: '   ' }), 'reservas@donfadrique.com');
+  });
+});
+
 describe('config.adminPhone', () => {
   it('uses Nicolás Sánchez Monge when ADMIN_PHONE is missing', () => {
     assert.equal(readAdminPhone(undefined), NICO_PHONE);

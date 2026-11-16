@@ -81,7 +81,7 @@ function isBudgetEvent(type) {
 
 function pendingStatusText(row) {
   const base = isBudgetEvent(row.type) ? 'Pendiente de presupuesto' : 'Pendiente de confirmación';
-  return alertFailed(row) ? `${base} · aviso no enviado` : base;
+  return alertFailed(row) ? `${base} · aviso de WhatsApp no enviado` : base;
 }
 
 function deferredNote(row) {
@@ -383,7 +383,7 @@ function renderAdminPage({ businessName, confirmed, pending, rejected, statuses,
 
   const failedCount = pendingList.filter(alertFailed).length;
   const failedNote = failedCount
-    ? `<p class="alert-banner"><strong>Aviso no enviado:</strong> ${
+    ? `<p class="alert-banner"><strong>Aviso de WhatsApp no enviado:</strong> ${
         failedCount === 1
           ? '1 solicitud no llegó a administración por WhatsApp.'
           : `${failedCount} solicitudes no llegaron a administración por WhatsApp.`

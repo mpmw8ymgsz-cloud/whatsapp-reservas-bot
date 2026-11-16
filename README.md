@@ -84,6 +84,9 @@ El token temporal caduca cada 24h. Para uno que no caduque:
    - `ADMIN_PHONE` (tu número, formato internacional sin `+`, ej. `34600000000`)
    - `TURSO_DATABASE_URL` (del paso 2)
    - `TURSO_AUTH_TOKEN` (del paso 2)
+   - `BREVO_API_KEY`, `ALERT_EMAIL`, `ALERT_EMAIL_FROM` y `ALERT_EMAIL_FROM_NAME`
+     (el correo de aviso a reservas; sin la clave el bot arranca igual y no envía correo).
+     El alta de la cuenta está en la sección [Aviso por correo](#aviso-por-correo-cuando-whatsapp-no-llega-a-nico).
 5. Dale a **Create Web Service**. Render construirá y arrancará el bot; al terminar te da
    una URL pública tipo `https://whatsapp-reservas-bot.onrender.com`.
 
@@ -203,6 +206,71 @@ El número va en formato internacional, sin `+` (si lo trae, se quita). Un núme
 en la misma llamada se manda una sola vez. La respuesta trae `ok` y el id de Meta, o el
 error de Meta (plantilla inexistente, aún no aprobada, parámetros que no cuadran), por cada
 número. Quien esté en la tabla `marketing_optouts` se omite.
+
+## Aviso por correo cuando WhatsApp no llega a Nico
+
+Cada solicitud terminada (mesa, menú, hotel, comida de Navidad de empresa, boda, congreso)
+y cada aviso de cancelación o de error al crear la reserva de hotel se lo manda el bot a Nico
+por WhatsApp. Ese mensaje falla con el error **131047** de Meta cuando han pasado más de 24 h
+desde el último mensaje de Nico al número del hotel: la solicitud se guarda, pero él no la ve.
+
+Por eso el mismo aviso sale **también por correo**, haya funcionado el WhatsApp o no. El correo
+está en español e incluye el número de solicitud, el tipo, el nombre y la empresa, el teléfono,
+la fecha, las personas, los detalles, el origen (en las bodas, si consta) y un enlace al panel
+`/admin`. Si el WhatsApp no ha salido, el asunto y el texto lo dicen. En el panel, esa solicitud
+queda en rojo con el estado «aviso de WhatsApp no enviado».
+
+El cliente no nota nada de esto: sus mensajes no cambian.
+
+### Por qué no el SMTP del hotel
+
+El servicio está en el plan gratuito de Render. Desde el 26 de septiembre de 2025 ese plan
+**no deja salir** a los puertos SMTP `25`, `465` ni `587`. El puerto `25` está cerrado en
+todos los planes. El correo de `donfadrique.com` (Roundcube, en `mail.donfadrique.com`)
+habla SMTP, así que desde este servicio no se alcanza. Brevo envía por HTTPS
+(`https://api.brevo.com`, puerto 443), que Render sí deja pasar. El plan Free de Brevo
+incluye 300 correos al día, de sobra para los avisos del hotel.
+
+Si `BREVO_API_KEY` no está puesta, el bot escribe en el log
+`[email-alert] BREVO_API_KEY no está configurada` y sigue. No se cae la conversación.
+
+### Qué hay que configurar para que el correo empiece a llegar
+
+1. Crea una cuenta en [Brevo](https://www.brevo.com) (plan Free).
+2. En **Ajustes → SMTP y API → API keys**, genera una clave v3. En Render, variable
+   `BREVO_API_KEY` con ese valor. No la subas a GitHub.
+3. En **Ajustes → Remitentes, dominios e IP → Remitentes**, añade un remitente:
+   - Nombre: `Hostería Don Fadrique` (o el valor de `ALERT_EMAIL_FROM_NAME`)
+   - Correo: `reservas@donfadrique.com` (tiene que ser el mismo que `ALERT_EMAIL_FROM`)
+4. Brevo manda un código de 6 cifras a ese buzón. Ábrelo en el Roundcube de
+   `donfadrique.com` y confírmalo. Sin este paso la API responde 401/400 y el bot solo lo
+   anota en el log.
+5. Variables opcionales (estos son los valores por defecto):
+   - `ALERT_EMAIL` = `reservas@donfadrique.com` (quién recibe el aviso)
+   - `ALERT_EMAIL_FROM` = `reservas@donfadrique.com` (el remitente verificado en Brevo)
+   - `ALERT_EMAIL_FROM_NAME` = `Hostería Don Fadrique`
+6. Redespliega el servicio en Render después de guardar las variables.
+
+El enlace del correo es `https://whatsapp-reservas-bot.onrender.com/admin` (o
+`PUBLIC_BASE_URL` + `/admin`). No incluye la clave: hay que abrirla con `?key=ADMIN_KEY`,
+como siempre.
+
+### Si el correo no aparece en Roundcube
+
+El SPF de `donfadrique.com` termina en `-all` y el DMARC está en `p=none`. Brevo acepta el
+envío en cuanto el remitente está verificado, pero el servidor del hotel puede dejar el
+mensaje en spam, o desconfiar de un correo que dice ser de `@donfadrique.com` y no sale de
+`mail.donfadrique.com`.
+
+Para que llegue con fiabilidad, en Brevo autentica el dominio `donfadrique.com` (o un
+subdominio, por ejemplo `avisos.donfadrique.com`) y copia en el DNS los registros DKIM y SPF
+que muestra Brevo. No borres el SPF que ya existe (`include:_spf.furanet.com`): añade el
+`include` de Brevo en ese mismo registro. Cuando el dominio esté autenticado, puedes dejar
+`ALERT_EMAIL_FROM` en `reservas@donfadrique.com` o pasarlo a una dirección del subdominio
+verificado.
+
+Hasta entonces, mira también la carpeta de spam de `reservas@donfadrique.com` y los logs del
+servicio: un envío bueno deja `[email-alert] enviado`.
 
 ## Límites de las capas gratuitas
 

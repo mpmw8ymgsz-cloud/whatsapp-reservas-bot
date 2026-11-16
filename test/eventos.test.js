@@ -12,6 +12,7 @@ process.env.TURSO_AUTH_TOKEN = 'test';
 process.env.ADMIN_KEY = 'test-key';
 
 const sent = [];
+const emails = [];
 const sessions = new Map();
 const reservations = [];
 const optouts = new Map();
@@ -154,6 +155,13 @@ const mockWa = {
   },
 };
 
+const mockMailer = {
+  async sendRequestAlert(alert) {
+    emails.push(JSON.parse(JSON.stringify(alert)));
+    return { ok: true };
+  },
+};
+
 const mockHotel = {
   async confirmReservation(id) {
     hotelCalls.push({ action: 'confirm', id: String(id) });
@@ -171,6 +179,7 @@ Module.prototype.require = function (id) {
   if (id === './db' || id === '../db') return mockDb;
   if (id === './wa' || id === '../wa') return mockWa;
   if (id === './hotelApi' || id === '../hotelApi') return mockHotel;
+  if (id === './mailer' || id === '../mailer') return mockMailer;
   return originalRequire.apply(this, arguments);
 };
 
@@ -212,6 +221,7 @@ async function say(phone, text, buttonId = null, rawMessage = null) {
 
 beforeEach(() => {
   sent.length = 0;
+  emails.length = 0;
   reservations.length = 0;
   sessions.clear();
   optouts.clear();
@@ -331,6 +341,41 @@ describe('conversación', () => {
     assert.match(admin[0].body, /NO 1/);
     assert.match(admin[0].body, /14:00/);
     assert.match(admin[0].body, /Ana Ruiz/);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].id, 1);
+    assert.equal(emails[0].kind, 'solicitud');
+    assert.equal(emails[0].type, 'restaurante');
+    assert.equal(emails[0].name, 'Ana Ruiz');
+    assert.equal(emails[0].phone, '34600000002');
+    assert.equal(emails[0].partySize, 4);
+    assert.equal(emails[0].date, reservations[0].date);
+    assert.equal(emails[0].time, '14:00');
+    assert.equal(emails[0].whatsappOk, true);
+    assert.equal(emails[0].source, undefined);
+  });
+
+  it('si el WhatsApp de una mesa falla, el correo sale y el panel queda marcado', async () => {
+    failAdminText = true;
+    const phone = '34600000046';
+    await say(phone, 'quiero una mesa');
+    await say(phone, '15/11');
+    await say(phone, '14:00');
+    await say(phone, '4');
+    await say(phone, 'Ana Ruiz');
+    const messages = await say(phone, 'sí', 'confirm_yes');
+    assert.match(joined(messages), /solicitud nº 1/i);
+    assert.match(joined(messages), /pendiente de confirmación/);
+    assert.doesNotMatch(joined(messages), /Mesa confirmada|queda \*confirmada\*/);
+    assert.equal(reservations[0].status, 'pending');
+    assert.equal(reservations[0].admin_alert, 'failed');
+    assert.match(reservations[0].details, /Aviso admin: no enviado/);
+    assert.equal(sent.filter((message) => message.to === '34699999999').length, 0);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].whatsappOk, false);
+    assert.equal(emails[0].type, 'restaurante');
+    assert.equal(emails[0].name, 'Ana Ruiz');
+    assert.equal(emails[0].partySize, 4);
+    assert.equal(emails[0].time, '14:00');
   });
 
   it('el hotel sigue pidiendo la fecha de entrada', async () => {
@@ -403,6 +448,17 @@ describe('conversación', () => {
     assert.match(admin, /pendiente de presupuesto/);
     assert.match(admin, /Talleres Alba SL/);
     assert.doesNotMatch(admin, /CONFIRMADA|confirmada/);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].id, 1);
+    assert.equal(emails[0].type, 'evento_empresa');
+    assert.equal(emails[0].company, 'Talleres Alba SL');
+    assert.equal(emails[0].name, 'Lucía Fernández');
+    assert.equal(emails[0].phone, phone);
+    assert.equal(emails[0].date, '2026-12-01');
+    assert.equal(emails[0].time, 'cena');
+    assert.equal(emails[0].partySize, 30);
+    assert.match(emails[0].details, /Talleres Alba SL/);
+    assert.equal(emails[0].whatsappOk, true);
   });
 
   it('rechaza un grupo pequeño, un día fuera de diciembre y avisa del 31 de diciembre', async () => {
@@ -588,6 +644,15 @@ describe('bodas, empresa y avisos', () => {
     assert.match(admin[0].body, /NO 1/);
     assert.match(admin[0].body, /Visita/);
     assert.doesNotMatch(admin[0].body, /661\s*724\s*158|34661724158/);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].type, 'evento_boda');
+    assert.equal(emails[0].name, 'Ana y Luis');
+    assert.equal(emails[0].phone, phone);
+    assert.equal(emails[0].partySize, 120);
+    assert.equal(emails[0].date, '2027-06-12');
+    assert.equal(emails[0].source, 'directo');
+    assert.equal(emails[0].whatsappOk, true);
+    assert.match(emails[0].details, /ana@example\.com/);
   });
 
   it('mesa para 4 mañana sigue siendo el restaurante', async () => {
@@ -648,6 +713,9 @@ describe('bodas, empresa y avisos', () => {
     assert.match(line, /ana@example\.com/);
     assert.match(line, /#1$/);
     assert.equal(sent.filter((m) => m.to === '34699999999' && m.kind === 'text').length, 0);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].whatsappOk, true);
+    assert.equal(emails[0].type, 'evento_boda');
   });
 
   it('si texto y plantilla fallan, la solicitud queda marcada en el panel', async () => {
@@ -660,6 +728,28 @@ describe('bodas, empresa y avisos', () => {
     assert.equal(reservations[0].admin_alert, 'failed');
     assert.match(reservations[0].details, /Aviso admin: no enviado/);
     assert.equal(sent.filter((m) => m.to === '34699999999').length, 0);
+    assert.equal(emails.length, 1);
+    assert.equal(emails[0].id, 1);
+    assert.equal(emails[0].whatsappOk, false);
+    assert.equal(emails[0].whatsappSkipped, false);
+    assert.equal(emails[0].name, 'Ana y Luis');
+    assert.equal(emails[0].source, 'directo');
+  });
+
+  it('si el correo falla, el cliente sigue recibiendo la confirmación', async () => {
+    const original = mockMailer.sendRequestAlert;
+    mockMailer.sendRequestAlert = async () => {
+      throw new Error('brevo caído');
+    };
+    try {
+      const messages = await completarBoda('34600000045');
+      assert.match(joined(messages), /solicitud nº 1/i);
+      assert.match(joined(messages), /pendiente de presupuesto/);
+      assert.equal(reservations[0].status, 'pending');
+      assert.equal(reservations[0].admin_alert, undefined);
+    } finally {
+      mockMailer.sendRequestAlert = original;
+    }
   });
 });
 
@@ -842,7 +932,7 @@ describe('panel de administración', () => {
     assert.match(html, /3 solicitudes sin confirmar/);
     assert.match(html, /Boda/);
     assert.match(html, /Ana y Luis/);
-    assert.match(html, /aviso no enviado/);
+    assert.match(html, /aviso de WhatsApp no enviado/);
     assert.match(html, /alert-failed/);
     assert.match(html, /1 solicitud no llegó a administración por WhatsApp/);
     assert.match(html, /Talleres &lt;Alba&gt;/);
