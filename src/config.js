@@ -17,6 +17,11 @@ module.exports = {
   verifyToken: clean(process.env.VERIFY_TOKEN),
   // Si ADMIN_PHONE no está en Render, avisar al WhatsApp Business de Nicolás Sánchez Monge.
   adminPhone: clean(process.env.ADMIN_PHONE) || '34661724158',
+  // Copia por email de cada aviso a administración. Sin RESEND_API_KEY no se envía.
+  adminAlertEmail: clean(process.env.ADMIN_ALERT_EMAIL) || 'reservas@donfadrique.com',
+  resendApiKey: clean(process.env.RESEND_API_KEY) || '',
+  alertFromEmail:
+    clean(process.env.ALERT_FROM_EMAIL) || 'Hostería Don Fadrique <avisos@donfadrique.com>',
   // Plantilla UTILITY (idioma es) por si el texto de sesión cae fuera de la ventana de 24 h.
   // Cuerpo sugerido: "Nueva solicitud de presupuesto en Hostería Don Fadrique: {{1}}. Revísala en el panel de reservas."
   adminAlertTemplate: clean(process.env.ADMIN_ALERT_TEMPLATE) || 'aviso_solicitud_presupuesto',

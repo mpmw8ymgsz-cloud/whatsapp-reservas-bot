@@ -84,6 +84,9 @@ El token temporal caduca cada 24h. Para uno que no caduque:
    - `ADMIN_PHONE` (tu número, formato internacional sin `+`, ej. `34600000000`)
    - `TURSO_DATABASE_URL` (del paso 2)
    - `TURSO_AUTH_TOKEN` (del paso 2)
+   - `RESEND_API_KEY` (opcional, pero hace falta para el aviso por email; ver más abajo)
+   - `ADMIN_ALERT_EMAIL` (opcional; por defecto `reservas@donfadrique.com`)
+   - `ALERT_FROM_EMAIL` (opcional; por defecto `Hostería Don Fadrique <avisos@donfadrique.com>`)
 5. Dale a **Create Web Service**. Render construirá y arrancará el bot; al terminar te da
    una URL pública tipo `https://whatsapp-reservas-bot.onrender.com`.
 
@@ -135,6 +138,9 @@ Edita [src/config.js](src/config.js), haz commit y push (Render vuelve a despleg
 - El estado de la conversación y las reservas se guardan en Turso, así que sobreviven a
   reinicios y redeploys del servicio.
 - El panel del equipo está en `/admin?key=ADMIN_KEY`.
+- Cada solicitud nueva avisa a Nico por WhatsApp y, si `RESEND_API_KEY` está puesta,
+  también por email a `reservas@donfadrique.com`. Si el WhatsApp no sale, la fila queda
+  en rojo en el panel (`WhatsApp no enviado`) y el correo lo dice.
 
 ## Plantilla de Navidad para empresas (envío manual)
 
@@ -204,6 +210,61 @@ en la misma llamada se manda una sola vez. La respuesta trae `ok` y el id de Met
 error de Meta (plantilla inexistente, aún no aprobada, parámetros que no cuadran), por cada
 número. Quien esté en la tabla `marketing_optouts` se omite.
 
+## Aviso por correo cuando entra una solicitud
+
+Cuando un cliente cierra una solicitud (mesa, hotel, comida de Navidad de empresa, boda,
+congreso, menú de fiesta) el bot escribe a Nico por WhatsApp. Meta solo deja ese mensaje
+de sesión si Nico ha escrito al número del hotel en las últimas 24 horas. Si la ventana
+está cerrada, Meta responde **131047** y Nico no se entera. La solicitud sí se guarda, y
+`/admin` la marca en rojo (`WhatsApp no enviado`).
+
+Además del WhatsApp, y tanto si ese WhatsApp ha salido como si no, el bot manda un
+correo en español a reservas. Lleva el número de solicitud, el tipo, el nombre y la empresa,
+el teléfono, la fecha, las personas, el detalle, el origen si el bot lo tiene apuntado
+(en las bodas: Bodas.net, la web, Instagram, directo, etc.) y el enlace al panel
+`/admin`. El enlace no incluye la clave. Si el WhatsApp a Nico ha fallado, el asunto
+empieza por «WhatsApp no enviado» y el cuerpo lo explica. Una cancelación del cliente
+y un fallo al crear la reserva de hotel en el programa también generan este correo.
+
+Si falta `RESEND_API_KEY`, o Resend rechaza el envío, el bot lo escribe en el log y
+sigue. El cliente no ve nada distinto.
+
+### Por qué Resend y no el correo del hotel
+
+El plan gratis de Render **bloquea el SMTP** en los puertos 25, 465 y 587 (el 25, en
+todos los planes). El webmail de donfadrique.com (Roundcube) usa esos puertos, así que
+desde el servicio gratis el correo del hotel no llega a salir. [Resend](https://resend.com)
+envía por HTTPS (`https://api.resend.com/emails`, puerto 443), que Render no bloquea.
+La capa gratis son **100 correos al día y 3.000 al mes**, sin tarjeta. Para el volumen
+de solicitudes del hotel sobra.
+
+### Qué hay que configurar para que el correo empiece a llegar
+
+1. Crea una cuenta gratis en [resend.com](https://resend.com).
+2. En **Domains**, añade `donfadrique.com`. Resend enseña unos registros DNS (DKIM y SPF).
+   Cópialos en el DNS del dominio y espera a que el estado pase a **Verified**. Hasta
+   entonces Resend rechaza cualquier envío desde `@donfadrique.com`.
+3. En **API Keys**, crea una clave con permiso de envío.
+4. En Render, en el servicio `whatsapp-reservas-bot`, añade estas variables y redeploy:
+
+   | Variable | Obligatoria | Valor |
+   | --- | --- | --- |
+   | `RESEND_API_KEY` | Sí, para que salga el correo | la clave `re_...` |
+   | `ADMIN_ALERT_EMAIL` | No | `reservas@donfadrique.com` (es el valor por defecto) |
+   | `ALERT_FROM_EMAIL` | No | `Hostería Don Fadrique <avisos@donfadrique.com>` |
+
+   `avisos@` no tiene que ser un buzón real. Las respuestas van a `ADMIN_ALERT_EMAIL`.
+   El remitente sí tiene que estar en el dominio verificado en Resend.
+
+5. Prueba antes de tocar el DNS, si quieres: pon
+   `ALERT_FROM_EMAIL` en `Hostería Don Fadrique <onboarding@resend.dev>`. Con ese
+   remitente Resend **solo entrega al email de la cuenta de Resend**, no a
+   reservas@. Sirve para ver que la clave funciona. Cuando el dominio esté verificado,
+   vuelve a `avisos@donfadrique.com`.
+
+Sin la clave, o con el dominio sin verificar, las solicitudes se siguen guardando y el
+WhatsApp se intenta igual. El fallo del correo no tumba el bot.
+
 ## Límites de las capas gratuitas
 
 - **Meta Cloud API**: gratis hasta 1.000 conversaciones de servicio al mes (cada
@@ -211,6 +272,8 @@ número. Quien esté en la tabla `marketing_optouts` se omite.
   [precios actualizados](https://developers.facebook.com/docs/whatsapp/pricing).
 - **Render Free**: 750 horas/mes, se duerme tras inactividad, sin tarjeta.
 - **Turso Free**: 5GB de almacenamiento, 500M lecturas/mes, sin tarjeta, no caduca.
+- **Resend Free**: 100 correos al día y 3.000 al mes (el aviso de cada solicitud). El
+  plan gratis de Render no puede usar SMTP; hace falta esta API por HTTPS.
 
 ## Próximas mejoras posibles (opcionales)
 

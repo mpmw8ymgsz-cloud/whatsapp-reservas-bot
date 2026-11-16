@@ -12,6 +12,7 @@ process.env.TURSO_AUTH_TOKEN = 'test';
 process.env.ADMIN_KEY = 'test-key';
 
 const sent = [];
+const adminEmails = [];
 const sessions = new Map();
 const reservations = [];
 const optouts = new Map();
@@ -165,12 +166,20 @@ const mockHotel = {
   },
 };
 
+const mockAdminEmail = {
+  async sendAdminAlertEmail(alert) {
+    adminEmails.push(alert);
+    return { ok: true };
+  },
+};
+
 const Module = require('module');
 const originalRequire = Module.prototype.require;
 Module.prototype.require = function (id) {
   if (id === './db' || id === '../db') return mockDb;
   if (id === './wa' || id === '../wa') return mockWa;
   if (id === './hotelApi' || id === '../hotelApi') return mockHotel;
+  if (id === './adminEmail' || id === '../adminEmail') return mockAdminEmail;
   return originalRequire.apply(this, arguments);
 };
 
@@ -212,6 +221,7 @@ async function say(phone, text, buttonId = null, rawMessage = null) {
 
 beforeEach(() => {
   sent.length = 0;
+  adminEmails.length = 0;
   reservations.length = 0;
   sessions.clear();
   optouts.clear();
@@ -403,6 +413,19 @@ describe('conversación', () => {
     assert.match(admin, /pendiente de presupuesto/);
     assert.match(admin, /Talleres Alba SL/);
     assert.doesNotMatch(admin, /CONFIRMADA|confirmada/);
+    const email = adminEmails.at(-1);
+    assert.equal(email.kind, 'request');
+    assert.equal(email.id, 1);
+    assert.equal(email.type, 'evento_empresa');
+    assert.equal(email.name, 'Lucía Fernández');
+    assert.equal(email.phone, phone);
+    assert.equal(email.date, '2026-12-01');
+    assert.equal(email.time, 'cena');
+    assert.equal(email.partySize, 30);
+    assert.match(email.details, /Empresa: Talleres Alba SL/);
+    assert.equal(email.source, null);
+    assert.equal(email.whatsapp.ok, true);
+    assert.equal(email.whatsapp.via, 'session');
   });
 
   it('rechaza un grupo pequeño, un día fuera de diciembre y avisa del 31 de diciembre', async () => {
@@ -588,6 +611,18 @@ describe('bodas, empresa y avisos', () => {
     assert.match(admin[0].body, /NO 1/);
     assert.match(admin[0].body, /Visita/);
     assert.doesNotMatch(admin[0].body, /661\s*724\s*158|34661724158/);
+    const email = adminEmails.at(-1);
+    assert.equal(email.kind, 'request');
+    assert.equal(email.id, 1);
+    assert.equal(email.type, 'evento_boda');
+    assert.equal(email.name, 'Ana y Luis');
+    assert.equal(email.phone, phone);
+    assert.equal(email.date, '2027-06-12');
+    assert.equal(email.partySize, 120);
+    assert.equal(email.source, 'directo');
+    assert.match(email.details, /Ceremonia: en la hostería/);
+    assert.equal(email.whatsapp.ok, true);
+    assert.equal(email.whatsapp.via, 'session');
   });
 
   it('mesa para 4 mañana sigue siendo el restaurante', async () => {
@@ -648,6 +683,12 @@ describe('bodas, empresa y avisos', () => {
     assert.match(line, /ana@example\.com/);
     assert.match(line, /#1$/);
     assert.equal(sent.filter((m) => m.to === '34699999999' && m.kind === 'text').length, 0);
+    const email = adminEmails.at(-1);
+    assert.equal(email.whatsapp.ok, true);
+    assert.equal(email.whatsapp.via, 'template');
+    assert.equal(email.type, 'evento_boda');
+    assert.equal(email.name, 'Ana y Luis');
+    assert.equal(reservations[0].admin_alert, undefined);
   });
 
   it('si texto y plantilla fallan, la solicitud queda marcada en el panel', async () => {
@@ -660,6 +701,13 @@ describe('bodas, empresa y avisos', () => {
     assert.equal(reservations[0].admin_alert, 'failed');
     assert.match(reservations[0].details, /Aviso admin: no enviado/);
     assert.equal(sent.filter((m) => m.to === '34699999999').length, 0);
+    const email = adminEmails.at(-1);
+    assert.equal(email.whatsapp.ok, false);
+    assert.match(email.whatsapp.error, /131047/);
+    assert.match(email.whatsapp.error, /plantilla/);
+    assert.equal(email.id, 1);
+    assert.equal(email.type, 'evento_boda');
+    assert.match(joined(messages), /pendiente de presupuesto/);
   });
 });
 
@@ -842,7 +890,8 @@ describe('panel de administración', () => {
     assert.match(html, /3 solicitudes sin confirmar/);
     assert.match(html, /Boda/);
     assert.match(html, /Ana y Luis/);
-    assert.match(html, /aviso no enviado/);
+    assert.match(html, /WhatsApp no enviado/);
+    assert.match(html, /también sale por email/);
     assert.match(html, /alert-failed/);
     assert.match(html, /1 solicitud no llegó a administración por WhatsApp/);
     assert.match(html, /Talleres &lt;Alba&gt;/);
@@ -1370,6 +1419,38 @@ describe('menús oficiales de Navidad, Nochevieja y Año Nuevo', () => {
     assert.match(admin[0].body, /4 personas/);
     assert.doesNotMatch(admin[0].body, PERSONAL);
     assert.equal(sessions.has(phone), false);
+    const email = adminEmails.at(-1);
+    assert.equal(email.kind, 'request');
+    assert.equal(email.type, 'restaurante');
+    assert.equal(email.name, 'Ana Ruiz');
+    assert.equal(email.phone, phone);
+    assert.equal(email.date, '2026-12-31');
+    assert.equal(email.partySize, 4);
+    assert.match(email.details, /Menú Nochevieja/);
+    assert.equal(email.source, null);
+    assert.equal(email.whatsapp.ok, true);
+  });
+
+  it('si el WhatsApp de una reserva falla, el correo avisa y el panel la marca', async () => {
+    failAdminText = true;
+    const phone = '34600000122';
+    await say(phone, 'Quiero reservar el menú de Nochevieja (31 de diciembre)');
+    await say(phone, '4');
+    await say(phone, 'Ana Ruiz');
+    const messages = await say(phone, 'sí', 'confirm_yes');
+    assert.match(joined(messages), /pendiente de confirmación/);
+    assert.match(joined(messages), /solicitud nº 1/i);
+    assert.equal(reservations[0].status, 'pending');
+    assert.equal(reservations[0].admin_alert, 'failed');
+    assert.match(reservations[0].details, /Aviso admin: no enviado/);
+    assert.equal(sent.filter((message) => message.to === '34699999999').length, 0);
+    const email = adminEmails.at(-1);
+    assert.equal(email.whatsapp.ok, false);
+    assert.match(email.whatsapp.error, /131047/);
+    assert.equal(email.type, 'restaurante');
+    assert.equal(email.name, 'Ana Ruiz');
+    assert.equal(email.phone, phone);
+    assert.equal(email.partySize, 4);
   });
 
   it('si la imagen no sale, el texto del menú sí llega', async () => {
