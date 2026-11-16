@@ -79,6 +79,7 @@ axios.post = async (url, body) => {
   if (/FROM message_status/i.test(sql)) return listStatuses(sql, args);
   if (/FROM reservations/i.test(sql)) return emptyResult();
   if (/wedding_leads|wedding_questions/i.test(sql)) return emptyResult();
+  if (/\bconversations\b|conversation_messages|\bFROM sessions\b/i.test(sql)) return emptyResult();
   const error = new Error(`SQL no esperada en el mock de Turso: ${sql}`);
   throw error;
 };

@@ -93,8 +93,17 @@ async function start(onMessage) {
   });
 }
 
+async function rememberOutbound(phone, body, msgType) {
+  try {
+    await require('./conversationLog').recordOutbound({ phone, body, msgType });
+  } catch (err) {
+    console.error('[conversacion] no se pudo guardar la salida:', err?.message || err);
+  }
+}
+
 async function sendText(to, body) {
   await sock.sendMessage(toJid(to), { text: body });
+  await rememberOutbound(to, body, 'text');
 }
 
 async function sendImage(to, image = {}) {
@@ -102,12 +111,15 @@ async function sendImage(to, image = {}) {
   const content = { image: { url: String(image.link) } };
   if (image.caption) content.caption = String(image.caption);
   await sock.sendMessage(toJid(to), content);
+  await rememberOutbound(to, image.caption || '', 'image');
 }
 
 async function sendButtons(to, bodyText, buttons) {
   pendingMenus.set(to, buttons);
   const list = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
-  await sock.sendMessage(toJid(to), { text: `${bodyText}\n\n${list}\n\n_(Responde con el número de la opción)_` });
+  const text = `${bodyText}\n\n${list}\n\n_(Responde con el número de la opción)_`;
+  await sock.sendMessage(toJid(to), { text });
+  await rememberOutbound(to, text, 'buttons');
 }
 
 async function sendList(to, bodyText, buttonText, rows) {
@@ -115,7 +127,9 @@ async function sendList(to, bodyText, buttonText, rows) {
   const list = rows
     .map((r, i) => `${i + 1}. ${r.title}${r.description ? ' - ' + r.description : ''}`)
     .join('\n');
-  await sock.sendMessage(toJid(to), { text: `${bodyText}\n\n${list}\n\n_(Responde con el número de la opción)_` });
+  const text = `${bodyText}\n\n${list}\n\n_(Responde con el número de la opción)_`;
+  await sock.sendMessage(toJid(to), { text });
+  await rememberOutbound(to, text, 'list');
 }
 
 async function markRead() {

@@ -272,6 +272,56 @@ verificado.
 Hasta entonces, mira también la carpeta de spam de `reservas@donfadrique.com` y los logs del
 servicio: un envío bueno deja `[email-alert] enviado`.
 
+## Historial de conversaciones
+
+El bot guarda **todos** los mensajes de WhatsApp, no solo las solicitudes terminadas: los que entran
+y los que él envía. Si Turso falla al guardar, lo anota en el log y la conversación con el cliente
+sigue igual.
+
+Cada mensaje lleva hora, teléfono, nombre de perfil (si Meta lo manda), dirección (`in` o `out`),
+texto, tipo (texto, imagen, botones, plantilla…) y el tema detectado (`boda`, `navidad_empresa`,
+`congreso`, `eventos`, `restaurante`, `hotel`, `menu_fiesta`, `llegada`, `fotos`, `menu`,
+`marketing`, `admin`, `general`…).
+
+El **origen** se anota solo si el primer mensaje del cliente es uno de los textos prefijados de
+`wa.me`:
+
+| Primer mensaje | `source` |
+| --- | --- |
+| `Quiero información para mi boda` | `directo` |
+| `Quiero información para mi boda (Bodas.net)` y lo mismo con Bodalia, Loggiata, TodoBoda, Web, Instagram o Email | `bodas_net`, `bodalia`, `loggiata`, `todoboda`, `web`, `instagram`, `email` |
+| `Quiero información para la comida de Navidad de empresa` | `navidad_empresa` |
+| `Quiero reservar el menú de Navidad (25 de diciembre)` | `menu_navidad` |
+| `Quiero reservar el menú de Nochevieja (31 de diciembre)` | `menu_nochevieja` |
+| `Quiero reservar el menú de Año Nuevo (1 de enero)` | `menu_anonuevo` |
+
+Un «hola» o un «quiero una boda» no llevan origen. El origen no cambia con los mensajes siguientes.
+
+El **cierre** (`outcome`) del chat queda en `abierta` hasta que hay una solicitud guardada
+(`solicitud`: mesa, hotel, menú, boda, comida de empresa o congreso) o un aviso al equipo sin
+solicitud (`escalacion`, por ejemplo un error del PMS). Una solicitud no vuelve a `abierta`.
+
+Las tres rutas son de solo lectura y piden la misma clave que el panel (`x-admin-key` o `?key=`).
+Sin la clave responden 403. No salen en la web pública. Las horas de las estadísticas se cuentan
+en `Europe/Madrid`. Si omites `from` y `to`, el intervalo son los últimos 30 días. Si pones solo
+una de las dos, o el formato no es `YYYY-MM-DD`, responden 400.
+
+```bash
+curl "https://tu-app.onrender.com/admin/conversations?from=2026-11-01&to=2026-11-16" \
+  -H "x-admin-key: TU_ADMIN_KEY"
+
+curl "https://tu-app.onrender.com/admin/conversations/34600000000" \
+  -H "x-admin-key: TU_ADMIN_KEY"
+
+curl "https://tu-app.onrender.com/admin/conversation-stats?from=2026-11-01&to=2026-11-16" \
+  -H "x-admin-key: TU_ADMIN_KEY"
+```
+
+`/admin/conversations` devuelve un resumen por chat con actividad en esas fechas: primer y último
+mensaje del intervalo, cuántos mensajes hay, tema, origen y cierre. `/admin/conversations/:phone`
+devuelve la transcripción completa (hasta 1000 mensajes). `/admin/conversation-stats` cuenta por
+día, tema, origen y cierre.
+
 ## Límites de las capas gratuitas
 
 - **Meta Cloud API**: gratis hasta 1.000 conversaciones de servicio al mes (cada

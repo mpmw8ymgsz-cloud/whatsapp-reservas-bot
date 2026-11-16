@@ -11,10 +11,24 @@ function client() {
   });
 }
 
+async function rememberOutbound(payload, label) {
+  try {
+    const conversationLog = require('./conversationLog');
+    await conversationLog.recordOutbound({
+      phone: payload && payload.to,
+      body: conversationLog.outboundText(payload),
+      msgType: (payload && payload.type) || label,
+    });
+  } catch (err) {
+    console.error('[conversacion] no se pudo guardar la salida:', err?.message || err);
+  }
+}
+
 async function send(payload, label) {
   try {
     const { data } = await client().post('', payload);
     console.log(`[send:${label}] OK ->`, JSON.stringify(data));
+    await rememberOutbound(payload, label);
     return data;
   } catch (err) {
     console.error(`[send:${label}] ERROR ->`, JSON.stringify(err?.response?.data || err.message));
