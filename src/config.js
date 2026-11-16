@@ -17,6 +17,12 @@ module.exports = {
   verifyToken: clean(process.env.VERIFY_TOKEN),
   // Si ADMIN_PHONE no está en Render, avisar al WhatsApp Business de Nicolás Sánchez Monge.
   adminPhone: clean(process.env.ADMIN_PHONE) || '34661724158',
+  // Copia por correo de cada aviso a administración. El plan gratuito de Render
+  // bloquea el SMTP (puertos 25, 465 y 587); el envío va por la API HTTPS de Brevo.
+  alertEmail: clean(process.env.ALERT_EMAIL) || 'reservas@donfadrique.com',
+  alertEmailFrom: clean(process.env.ALERT_EMAIL_FROM) || 'reservas@donfadrique.com',
+  alertEmailFromName: clean(process.env.ALERT_EMAIL_FROM_NAME) || 'Hostería Don Fadrique',
+  brevoApiKey: clean(process.env.BREVO_API_KEY) || '',
   // Plantilla UTILITY (idioma es) por si el texto de sesión cae fuera de la ventana de 24 h.
   // Cuerpo sugerido: "Nueva solicitud de presupuesto en Hostería Don Fadrique: {{1}}. Revísala en el panel de reservas."
   adminAlertTemplate: clean(process.env.ADMIN_ALERT_TEMPLATE) || 'aviso_solicitud_presupuesto',

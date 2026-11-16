@@ -495,6 +495,14 @@ function thanksFor(data, business) {
   return thanksEmpresa(data, business);
 }
 
+function alertFields(data) {
+  return {
+    company: data.company || null,
+    source: data.source || null,
+    phoneContact: data.phoneContact || null,
+  };
+}
+
 function reservationFor(data, from) {
   if (data.flow === 'boda') {
     return {
@@ -510,6 +518,7 @@ function reservationFor(data, from) {
       },
       adminText: adminBoda(data, from),
       alertSummary: alertLine('Boda', data),
+      ...alertFields(data),
     };
   }
   if (data.flow === 'congreso') {
@@ -526,6 +535,7 @@ function reservationFor(data, from) {
       },
       adminText: adminCongreso(data, from),
       alertSummary: alertLine('Congreso', data),
+      ...alertFields(data),
     };
   }
   return {
@@ -541,6 +551,7 @@ function reservationFor(data, from) {
     },
     adminText: adminEmpresa(data, from),
     alertSummary: alertLine('Navidad empresa', data),
+    ...alertFields(data),
   };
 }
 
