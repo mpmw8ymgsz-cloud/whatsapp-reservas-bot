@@ -11,6 +11,7 @@ const fotos = require('./fotos');
 const menusFiesta = require('./menusFiesta');
 const confirmacion = require('./confirmacion');
 const weddingSources = require('./weddingSources');
+const adminEmail = require('./adminEmail');
 const { applyDecision } = require('./reservasDecision');
 
 const B = config.business;
@@ -402,9 +403,16 @@ async function quoteHotel(from, session) {
       from,
       `Ha habido un problema al reservar esas fechas 😔. Llámanos al ${B.phone} y lo solucionamos enseguida.`
     );
-    if (config.adminPhone) {
-      await wa.sendText(config.adminPhone, `⚠️ Error del bot al crear reserva de hotel (${d.entrada} -> ${d.salida}, ${d.pax}p, ${d.name}, tel ${from}): ${pms.msg}`);
-    }
+    await notifyAdminPlain({
+      kind: 'hotel_error',
+      type: 'hotel',
+      name: d.name,
+      phone: from,
+      date: d.entrada && d.salida ? `${d.entrada} → ${d.salida}` : d.entrada,
+      partySize: d.pax,
+      details: `No se pudo crear la reserva en el hotel. ${pms.msg || ''}`.trim(),
+      whatsappBody: `⚠️ Error del bot al crear reserva de hotel (${d.entrada} -> ${d.salida}, ${d.pax}p, ${d.name}, tel ${from}): ${pms.msg}`,
+    });
     return;
   }
 
@@ -734,9 +742,18 @@ async function handleCancelSelect(from, buttonId) {
     else if (row && row.status === 'pending') text = `Solicitud #${id} anulada. Seguía pendiente de confirmación.`;
     else text = `Reserva #${id} cancelada. ¡Esperamos verte pronto! 👋`;
     await wa.sendText(from, text);
-    if (config.adminPhone) {
-      await wa.sendText(config.adminPhone, `❌ CANCELACIÓN — reserva #${id} (tel ${from})`);
-    }
+    await notifyAdminPlain({
+      kind: 'cancel',
+      id,
+      type: row && row.type,
+      name: row && row.name,
+      phone: from,
+      date: row && row.date,
+      time: row && row.time,
+      partySize: row && (row.party_size != null ? row.party_size : row.partySize),
+      details: row && row.details,
+      whatsappBody: `❌ CANCELACIÓN — reserva #${id} (tel ${from})`,
+    });
   } else {
     await wa.sendText(from, 'No pude cancelar esa reserva.');
   }
@@ -832,49 +849,138 @@ function oneLine(value) {
     .trim();
 }
 
+async function markAdminAlertFailedSafe(id) {
+  try {
+    if (typeof db.markAdminAlertFailed === 'function') await db.markAdminAlertFailed(id);
+  } catch (markErr) {
+    console.error(`[admin-alert] no se pudo marcar el fallo de #${id}: ${markErr.message}`);
+  }
+}
+
+async function safeAdminEmail(alert) {
+  try {
+    await adminEmail.sendAdminAlertEmail(alert);
+  } catch (err) {
+    const which = alert && alert.id != null ? `#${alert.id}` : (alert && alert.kind) || 'aviso';
+    console.error(`[admin-email] fallo inesperado en ${which}: ${err.message}`);
+  }
+}
+
+async function loadReservation(id) {
+  if (typeof db.getReservation !== 'function') return null;
+  try {
+    return await db.getReservation(id);
+  } catch (err) {
+    console.error(`[admin-email] no se pudo leer la solicitud #${id}: ${err.message}`);
+    return null;
+  }
+}
+
+async function trackedSource(type, phone, known) {
+  if (known) return known;
+  if (type !== 'evento_boda' || !phone || typeof db.getWeddingLead !== 'function') return null;
+  try {
+    const lead = await db.getWeddingLead(phone);
+    return lead && lead.source ? lead.source : null;
+  } catch (err) {
+    console.error(`[admin-email] no se pudo leer el origen: ${err.message}`);
+    return null;
+  }
+}
+
+function requestFields(id, reservation, row) {
+  const record = (reservation && reservation.record) || {};
+  const partyFromRow = row && (row.party_size != null ? row.party_size : row.partySize);
+  const partySize = record.partySize != null ? record.partySize : partyFromRow != null ? partyFromRow : null;
+  return {
+    kind: 'request',
+    id,
+    type: record.type || (row && row.type) || null,
+    name: record.name || (row && row.name) || null,
+    phone: record.phone || (row && row.phone) || null,
+    date: record.date || (row && row.date) || null,
+    time: record.time || (row && row.time) || null,
+    partySize,
+    details: record.details || (row && row.details) || null,
+    source: (reservation && reservation.source) || null,
+  };
+}
+
+async function emailRequest(id, reservation, whatsapp) {
+  const record = (reservation && reservation.record) || {};
+  const row = record.type ? null : await loadReservation(id);
+  const fields = requestFields(id, reservation, row);
+  fields.source = await trackedSource(fields.type, fields.phone, fields.source);
+  await safeAdminEmail({ ...fields, whatsapp });
+}
+
+// WhatsApp de sesión y, si falla, el correo igual. No marca el panel: no hay
+// solicitud pendiente (error de hotel) o la reserva ya está cancelada.
+async function notifyAdminPlain(alert) {
+  if (!config.adminPhone) return;
+  const whatsapp = { ok: false, via: 'session', error: null };
+  const label = alert.id != null ? `#${alert.id}` : alert.kind || 'aviso';
+  try {
+    await wa.sendText(config.adminPhone, alert.whatsappBody);
+    whatsapp.ok = true;
+  } catch (err) {
+    whatsapp.error = formatSendError(err);
+    console.error(`[admin-alert] texto no enviado para ${label}: ${whatsapp.error}`);
+  }
+  const fields = { ...alert };
+  delete fields.whatsappBody;
+  await safeAdminEmail({ ...fields, whatsapp });
+}
+
 // Primero el texto de sesión. Si Meta lo rechaza (p. ej. 131047, fuera de 24 h),
 // plantilla UTILITY con un solo parámetro. Si también falla, queda marcado en /admin.
+// El correo sale en los tres casos.
 async function notifyAdminOfBudget(id, reservation) {
   if (!config.adminPhone || !reservation?.adminText) return;
+  const whatsapp = { ok: false, via: null, error: null };
   try {
     const [adminReply] = grupos.stampId([{ kind: 'text', body: reservation.adminText }], id);
     const summarySource = reservation.alertSummary || `Solicitud #{{id}}`;
     const [summaryReply] = grupos.stampId([{ kind: 'text', body: summarySource }], id);
     const summary = oneLine(summaryReply.body) || `Solicitud #${id}`;
 
+    let sessionError = null;
     try {
       await wa.sendText(config.adminPhone, `${adminReply.body}\n\n${confirmacion.adminInstructions(id)}`);
-      return;
+      whatsapp.ok = true;
+      whatsapp.via = 'session';
     } catch (err) {
-      console.error(`[admin-alert] texto de sesión no enviado para #${id}: ${formatSendError(err)}`);
+      sessionError = formatSendError(err);
+      console.error(`[admin-alert] texto de sesión no enviado para #${id}: ${sessionError}`);
     }
 
-    try {
-      if (typeof wa.sendTemplate !== 'function') {
-        throw new Error('este proveedor no puede enviar plantillas');
-      }
-      await wa.sendTemplate(config.adminPhone, {
-        name: config.adminAlertTemplate,
-        language: 'es',
-        bodyParameters: [summary],
-      });
-      console.log(`[admin-alert] plantilla ${config.adminAlertTemplate} enviada para #${id}`);
-    } catch (err) {
-      console.error(`[admin-alert] plantilla no enviada para #${id}: ${formatSendError(err)}`);
+    if (!whatsapp.ok) {
       try {
-        await db.markAdminAlertFailed(id);
-      } catch (markErr) {
-        console.error(`[admin-alert] no se pudo marcar el fallo de #${id}: ${markErr.message}`);
+        if (typeof wa.sendTemplate !== 'function') {
+          throw new Error('este proveedor no puede enviar plantillas');
+        }
+        await wa.sendTemplate(config.adminPhone, {
+          name: config.adminAlertTemplate,
+          language: 'es',
+          bodyParameters: [summary],
+        });
+        console.log(`[admin-alert] plantilla ${config.adminAlertTemplate} enviada para #${id}`);
+        whatsapp.ok = true;
+        whatsapp.via = 'template';
+      } catch (err) {
+        const templateError = formatSendError(err);
+        console.error(`[admin-alert] plantilla no enviada para #${id}: ${templateError}`);
+        whatsapp.error = sessionError ? `${sessionError}; plantilla: ${templateError}` : templateError;
+        await markAdminAlertFailedSafe(id);
       }
     }
   } catch (err) {
     console.error(`[admin-alert] fallo inesperado en #${id}: ${formatSendError(err)}`);
-    try {
-      await db.markAdminAlertFailed(id);
-    } catch (markErr) {
-      console.error(`[admin-alert] no se pudo marcar el fallo de #${id}: ${markErr.message}`);
-    }
+    whatsapp.ok = false;
+    whatsapp.error = formatSendError(err);
+    await markAdminAlertFailedSafe(id);
   }
+  await emailRequest(id, reservation, whatsapp);
 }
 
 async function rememberClientPhoto(from, session, rawMessage) {
@@ -987,16 +1093,19 @@ async function finishPendingReservation(from, fields) {
 
 async function notifyAdminText(id, body) {
   if (!config.adminPhone) return;
+  const row = await loadReservation(id);
+  const fields = requestFields(id, null, row);
+  fields.source = await trackedSource(fields.type, fields.phone, fields.source);
+  const whatsapp = { ok: false, via: 'session', error: null };
   try {
     await wa.sendText(config.adminPhone, body);
+    whatsapp.ok = true;
   } catch (err) {
-    console.error(`[admin-alert] texto no enviado para #${id}: ${formatSendError(err)}`);
-    try {
-      if (typeof db.markAdminAlertFailed === 'function') await db.markAdminAlertFailed(id);
-    } catch (markErr) {
-      console.error(`[admin-alert] no se pudo marcar el fallo de #${id}: ${markErr.message}`);
-    }
+    whatsapp.error = formatSendError(err);
+    console.error(`[admin-alert] texto no enviado para #${id}: ${whatsapp.error}`);
+    await markAdminAlertFailedSafe(id);
   }
+  await safeAdminEmail({ ...fields, whatsapp });
 }
 
 async function confirmMenuReservation(from, session) {

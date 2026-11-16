@@ -510,6 +510,7 @@ function reservationFor(data, from) {
       },
       adminText: adminBoda(data, from),
       alertSummary: alertLine('Boda', data),
+      source: data.source || null,
     };
   }
   if (data.flow === 'congreso') {
@@ -526,6 +527,7 @@ function reservationFor(data, from) {
       },
       adminText: adminCongreso(data, from),
       alertSummary: alertLine('Congreso', data),
+      source: data.source || null,
     };
   }
   return {
@@ -541,6 +543,7 @@ function reservationFor(data, from) {
     },
     adminText: adminEmpresa(data, from),
     alertSummary: alertLine('Navidad empresa', data),
+    source: data.source || null,
   };
 }
 

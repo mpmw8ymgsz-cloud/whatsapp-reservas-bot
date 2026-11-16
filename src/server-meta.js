@@ -81,7 +81,7 @@ function isBudgetEvent(type) {
 
 function pendingStatusText(row) {
   const base = isBudgetEvent(row.type) ? 'Pendiente de presupuesto' : 'Pendiente de confirmación';
-  return alertFailed(row) ? `${base} · aviso no enviado` : base;
+  return alertFailed(row) ? `${base} · WhatsApp no enviado` : base;
 }
 
 function deferredNote(row) {
@@ -387,7 +387,7 @@ function renderAdminPage({ businessName, confirmed, pending, rejected, statuses,
         failedCount === 1
           ? '1 solicitud no llegó a administración por WhatsApp.'
           : `${failedCount} solicitudes no llegaron a administración por WhatsApp.`
-      } Siguen guardadas en esta lista.</p>`
+      } Siguen guardadas en esta lista. Si el correo de avisos está configurado, el mismo aviso también sale por email.</p>`
     : '';
 
   return `<!DOCTYPE html>
