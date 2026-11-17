@@ -9,6 +9,7 @@ const fotos = require('./fotos');
 const marketing = require('./marketing');
 const weddingSources = require('./weddingSources');
 const conocimiento = require('./eventosConocimiento');
+const tours = require('./turoperadores');
 
 const EMPRESA_TRIGGER = 'Quiero información para la comida de Navidad de empresa';
 const ZONE = 'Europe/Madrid';
@@ -27,6 +28,7 @@ const SPECIFIC_TOPICS = new Set([
   'menu_navidad',
   'menu_nochevieja',
   'menu_anonuevo',
+  'turoperador',
 ]);
 
 const SOURCE_LABELS = {
@@ -34,6 +36,7 @@ const SOURCE_LABELS = {
   menu_navidad: 'Menú Navidad',
   menu_nochevieja: 'Menú Nochevieja',
   menu_anonuevo: 'Menú Año Nuevo',
+  turoperador: 'Turoperador / grupo',
 };
 
 function digits(value) {
@@ -61,6 +64,7 @@ function sourceTag(raw) {
   if (!text) return null;
   if (text === tidy(conocimiento.WEDDING_TRIGGER)) return weddingSources.DIRECT_SOURCE;
   if (text === tidy(EMPRESA_TRIGGER)) return 'navidad_empresa';
+  if (text === tidy(tours.TRIGGER_ES) || text === tidy(tours.TRIGGER_EN)) return 'turoperador';
   for (const menu of menusFiesta.MENUS) {
     if (text === tidy(menu.reserveText)) return `menu_${menu.id}`;
   }
@@ -82,6 +86,7 @@ function topicFromButton(buttonId) {
   if (buttonId === 'boda_start' || buttonId.startsWith('boda_')) return 'boda';
   if (buttonId === 'cong_start' || buttonId.startsWith('cong_')) return 'congreso';
   if (buttonId.startsWith('emp_')) return 'navidad_empresa';
+  if (buttonId.startsWith('top_')) return 'turoperador';
   if (buttonId === 'ver_fotos') return 'fotos';
   return '';
 }
@@ -90,6 +95,7 @@ function topicFromText(norm) {
   if (!norm) return '';
   const intent = grupos.classifyIncoming(norm);
   if (intent && intent.kind === 'boda') return 'boda';
+  if (tours.isInquiry(norm)) return 'turoperador';
   if (intent && intent.kind === 'congreso') return 'congreso';
   if (intent && intent.kind === 'empresa_overview') return 'navidad_empresa';
   if (intent && intent.kind === 'hub') return 'eventos';
@@ -115,6 +121,7 @@ function sessionTopic(session) {
   if (!session) return '';
   const data = session.data || {};
   const step = session.step || '';
+  if (data.flow === 'turoperador') return 'turoperador';
   if (data.flow === 'boda') return 'boda';
   if (data.flow === 'empresa') return 'navidad_empresa';
   if (data.flow === 'congreso') return 'congreso';

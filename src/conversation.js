@@ -5,6 +5,7 @@ const wa = require('./wa');
 const { parseDate, parseTimeCandidates, getSlotsForDate, normalize } = require('./dateParser');
 const hotelApi = require('./hotelApi');
 const grupos = require('./grupos');
+const tours = require('./turoperadores');
 const faq = require('./faqLlegada');
 const marketing = require('./marketing');
 const fotos = require('./fotos');
@@ -39,6 +40,7 @@ function expLabel(type, status) {
   if (type === 'evento_empresa') return 'Empresa · pendiente';
   if (type === 'evento_congreso') return 'Congreso · pendiente';
   if (type === 'evento_boda') return 'Boda · pendiente';
+  if (type === 'evento_turoperador') return 'Turoperador / grupo · pendiente';
   if (type === 'hotel') return status === 'pending' ? 'Hotel · pendiente' : 'Hotel';
   if (type === 'otivm') return 'OTIVM (histórico)';
   if (status === 'pending') return 'Restaurante · pendiente';
@@ -49,13 +51,22 @@ function typeIcon(type) {
   if (type === 'evento_congreso') return '🏛️';
   if (type === 'evento_boda') return '💍';
   if (type === 'evento_empresa') return '🎄';
+  if (type === 'evento_turoperador') return '🚌';
   if (type === 'hotel') return '🛏️';
   if (type === 'otivm') return '🌿';
   return '🍽️';
 }
 
 function isPendingEvent(type) {
-  return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda';
+  return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda' || type === 'evento_turoperador';
+}
+
+function isCollectingOtherGroup(session) {
+  if (!session || session.step !== STEP.GRUPO) return false;
+  const data = session.data || {};
+  if (!data.flow || data.flow === 'turoperador') return false;
+  if (!data.stage || data.stage === 'hub' || data.stage === 'browse') return false;
+  return true;
 }
 
 function inboundIso(rawMessage) {
@@ -137,6 +148,11 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
     }
   }
 
+  const activeTour = session.step === STEP.GRUPO && session.data && session.data.flow === 'turoperador';
+  if (!activeTour && session.step !== STEP.NAME && !isCollectingOtherGroup(session) && tours.isInquiry(normText)) {
+    return dispatchGrupo(from, tours.start(B, { text }), { text, buttonId: routedButton });
+  }
+
   if (!buttonId && !collectingTable(session)) {
     const reserveId = menusFiesta.matchReservation(normText);
     if (reserveId && holidayMenusNow(session, normText, reserveId)) {
@@ -170,6 +186,15 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
     grupos.isCeremonyReply(text, routedButton);
   if (askingPhotos && !ceremonyReply) {
     return sendPhotoTour(from, normText, session);
+  }
+
+  if (activeTour || tours.isTourButton(routedButton)) {
+    const data = activeTour ? session.data : {};
+    return dispatchGrupo(
+      from,
+      tours.handle({ data, text, buttonId: routedButton, from, zone: B.timezone, business: B }),
+      { text, buttonId: routedButton }
+    );
   }
 
   if (session.step === STEP.GRUPO || grupos.isGrupoButton(routedButton)) {
@@ -273,7 +298,7 @@ async function showMenu(from) {
   await db.clearSession(from);
   await wa.sendButtons(
     from,
-    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "ver fotos", "mis reservas", "info", "boda", "comidas de Navidad" o "congreso"._`,
+    `¡Hola! 👋 Bienvenido/a a *${B.name}*.\n\n¿Qué te apetece reservar?\n\n_También puedes escribir "ver fotos", "mis reservas", "info", "boda", "comidas de Navidad", "congreso" o "turoperador"._`,
     [
       { id: 'exp_rest', title: '🍽️ Restaurante' },
       { id: 'exp_hotel', title: '🛏️ Hotel' },
@@ -292,6 +317,7 @@ async function sendInfo(from) {
       `🎉 *Eventos*: bodas en exclusiva, congresos y grupos grandes (capacidad total de 500 a 700; terraza acristalada de 10 a 50). ` +
       `En diciembre, comidas de Navidad para empresas: menú a medida, desde 55 € + IVA por persona. ` +
       `Para una boda, escribid «Quiero información para mi boda». También vale *eventos* o *congreso*.\n\n` +
+      `🚌 *Turoperadores*: comida de grupo y alojamiento para agencias, DMC y guías. Escribe *turoperador* y dejo la solicitud para la propuesta de 2027.\n\n` +
       `Escribe *ver fotos* para ver la casa, o *menu* para volver al inicio.`
   );
 }
@@ -1121,7 +1147,7 @@ async function confirmMenuReservation(from, session) {
 function holidayMenusNow(session, norm, which) {
   if (!session || session.step !== STEP.GRUPO) return true;
   const flow = session.data && session.data.flow;
-  if (flow === 'boda' || flow === 'congreso') {
+  if (flow === 'boda' || flow === 'congreso' || flow === 'turoperador') {
     return /\b(?:menu|menus|carta)\b/.test(norm) && /navidad|nochevieja|ano nuevo/.test(norm);
   }
   return true;
@@ -1158,6 +1184,9 @@ async function sendPhotoTour(from, norm, session) {
   if (session.step && session.step !== STEP.IDLE) {
     await wa.sendText(from, 'Cuando quieras seguimos con lo que estábamos apuntando.');
     return;
+  }
+  if (tours.isInquiry(norm)) {
+    return dispatchGrupo(from, tours.start(B, { text: norm }), { text: norm });
   }
   const intent = grupos.classifyIncoming(norm);
   if (intent && intent.kind === 'boda') {

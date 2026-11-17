@@ -55,7 +55,7 @@ async function execute(sql, args = []) {
   return result.response.result;
 }
 
-const PENDING_EVENT_TYPES = ['evento_empresa', 'evento_congreso', 'evento_boda'];
+const PENDING_EVENT_TYPES = ['evento_empresa', 'evento_congreso', 'evento_boda', 'evento_turoperador'];
 
 const ready = (async () => {
   await execute(`CREATE TABLE IF NOT EXISTS reservations (

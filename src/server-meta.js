@@ -67,6 +67,7 @@ function typeLabel(type) {
   if (type === 'evento_empresa') return '🎄 Empresa';
   if (type === 'evento_congreso') return '🏛️ Congreso';
   if (type === 'evento_boda') return '💍 Boda';
+  if (type === 'evento_turoperador') return '🚌 Turoperador / grupo';
   if (type === 'hotel') return '🛏️ Hotel';
   if (type === 'otivm') return 'OTIVM (histórico)';
   return '🍽️ Restaurante';
@@ -77,7 +78,7 @@ function alertFailed(row) {
 }
 
 function isBudgetEvent(type) {
-  return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda';
+  return type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda' || type === 'evento_turoperador';
 }
 
 function pendingStatusText(row) {

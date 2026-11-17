@@ -23,6 +23,7 @@ function typeLabel(type) {
   if (type === 'evento_empresa') return 'Comida de Navidad de empresa';
   if (type === 'evento_congreso') return 'Congreso o evento';
   if (type === 'evento_boda') return 'Boda';
+  if (type === 'evento_turoperador') return 'Turoperador / grupo';
   if (type === 'hotel') return 'Hotel';
   if (type === 'otivm') return 'OTIVM';
   return 'Restaurante';
@@ -47,6 +48,7 @@ function companyOf(alert) {
 function sourceLabel(source) {
   const raw = oneLine(source);
   if (!raw) return '';
+  if (raw === 'turoperador') return 'Turoperador / grupo';
   return weddingSources.labelFor(raw);
 }
 
