@@ -42,8 +42,9 @@ function phoneDigits(value) {
 
 function isAdminSender(from, adminPhone) {
   const left = phoneDigits(from);
-  const right = phoneDigits(adminPhone);
-  return left !== '' && left === right;
+  if (!left) return false;
+  const list = Array.isArray(adminPhone) ? adminPhone : [adminPhone];
+  return list.some((phone) => phoneDigits(phone) === left);
 }
 
 function scrubCustomerPhone(text, phone) {

@@ -66,6 +66,8 @@ describe('órdenes de Nico', () => {
     assert.equal(isAdminSender('0034661724158', '34661724158'), true);
     assert.equal(isAdminSender('34600000000', '34661724158'), false);
     assert.equal(isAdminSender('', '34661724158'), false);
+    assert.equal(isAdminSender('+34 222 333 444', ['34611111111', '34222333444']), true);
+    assert.equal(isAdminSender('34600000000', ['34611111111', '34222333444']), false);
   });
 });
 

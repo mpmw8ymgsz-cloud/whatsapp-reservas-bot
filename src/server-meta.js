@@ -678,11 +678,19 @@ function createApp(onMessage, deps = {}) {
     const reason = rawReason == null ? '' : String(rawReason);
     try {
       const result = await decideReservation({ id, action, reason });
-      if (result.httpStatus === 200 && result.adminText && config.adminPhone) {
-        try {
-          await sendAdminText(config.adminPhone, result.adminText);
-        } catch (err) {
-          console.error('[decision] no se pudo avisar al admin:', err.message);
+      const adminPhones =
+        Array.isArray(config.adminPhones) && config.adminPhones.length
+          ? config.adminPhones
+          : config.adminPhone
+            ? [config.adminPhone]
+            : [];
+      if (result.httpStatus === 200 && result.adminText && adminPhones.length) {
+        for (const phone of adminPhones) {
+          try {
+            await sendAdminText(phone, result.adminText);
+          } catch (err) {
+            console.error(`[decision] no se pudo avisar a ${phone}:`, err.message);
+          }
         }
       }
       if (wantsJson(req)) return res.status(result.httpStatus).json(result.body);

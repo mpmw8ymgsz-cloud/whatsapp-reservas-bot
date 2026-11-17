@@ -135,7 +135,7 @@ function sessionTopic(session) {
 }
 
 function detectTopic({ text, buttonId, session, phone } = {}) {
-  if (phone && confirmacion.isAdminSender(phone, config.adminPhone)) return 'admin';
+  if (phone && confirmacion.isAdminSender(phone, config.adminPhones || config.adminPhone)) return 'admin';
   const norm = normalize(text || '');
   if (marketing.isOptOut(norm, buttonId)) return 'marketing';
   if (['hola', 'menu', 'inicio', 'buenas', 'empezar', 'volver'].includes(norm)) return 'menu';

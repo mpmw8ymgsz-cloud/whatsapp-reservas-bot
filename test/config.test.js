@@ -6,8 +6,13 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const NICO_PHONE = '34661724158';
 
-function readAdminPhone(adminPhone) {
-  const env = { ...process.env };
+function readAdminPhone(adminPhone, extra = {}) {
+  const env = { ...process.env, ...extra };
+  delete env.ADMIN_PHONES;
+  for (const [key, value] of Object.entries(extra)) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
   if (adminPhone === undefined) delete env.ADMIN_PHONE;
   else env.ADMIN_PHONE = adminPhone;
 
@@ -101,5 +106,26 @@ describe('config.adminPhone', () => {
   it('lets ADMIN_PHONE override the default', () => {
     assert.equal(readAdminPhone('34600000000'), '34600000000');
     assert.equal(readAdminPhone('  34611111111  '), '34611111111');
+  });
+
+  it('acepta varios teléfonos en ADMIN_PHONE o en ADMIN_PHONES', () => {
+    const listed = readConfig('JSON.stringify(require("./src/config").adminPhones)', {
+      ADMIN_PHONE: undefined,
+      ADMIN_PHONES: '34611111111, +34 222 333 444',
+    });
+    assert.equal(listed, '["34611111111","34222333444"]');
+
+    const combined = readConfig('JSON.stringify(require("./src/config").adminPhones)', {
+      ADMIN_PHONE: '+34 661 72 41 58',
+      ADMIN_PHONES: '34611111111, 34661724158',
+    });
+    assert.equal(combined, '["34611111111","34661724158"]');
+    assert.equal(
+      readConfig('require("./src/config").adminPhone', {
+        ADMIN_PHONE: undefined,
+        ADMIN_PHONES: '34622222222,34633333333',
+      }),
+      '34622222222'
+    );
   });
 });

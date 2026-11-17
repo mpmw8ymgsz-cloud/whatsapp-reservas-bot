@@ -113,8 +113,9 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
   const routedButton = marketing.routeButtonId(buttonId);
   const incomingImage = !!(rawMessage && rawMessage.type === 'image');
 
-  // El teléfono de Nico no entra en el flujo del cliente: confirma o rechaza solicitudes.
-  if (confirmacion.isAdminSender(from, config.adminPhone)) {
+  // Los teléfonos de administración no entran en el flujo del cliente: confirman o rechazan.
+  if (confirmacion.isAdminSender(from, config.adminPhones || config.adminPhone)) {
+    await noteInbound(from, rawMessage);
     return handleAdmin(from, normText, text);
   }
 
@@ -901,37 +902,85 @@ async function notifyAdminOfBudget(id, reservation) {
   });
 }
 
+function adminPhoneList() {
+  const source = Array.isArray(config.adminPhones) && config.adminPhones.length ? config.adminPhones : [config.adminPhone];
+  const phones = [];
+  const seen = new Set();
+  for (const phone of source) {
+    const digits = confirmacion.phoneDigits(phone);
+    if (!digits || seen.has(digits)) continue;
+    seen.add(digits);
+    phones.push(digits);
+  }
+  return phones;
+}
+
+// null: no hay marca, se intenta el mensaje de sesión. true: ventana abierta. false: cerrada.
+async function adminWindow(phone) {
+  if (typeof db.getLastInbound !== 'function') return null;
+  try {
+    return confirmacion.isWindowOpen(await db.getLastInbound(phone));
+  } catch (err) {
+    console.error(`[admin-alert] no se pudo leer la ventana de ${phone}: ${err.message}`);
+    return null;
+  }
+}
+
+// Un intento por cada administrador. Si sabemos que su ventana de 24 h está
+// cerrada, no se le escribe. Si no hay marca, se intenta el texto de sesión;
+// en los presupuestos, el fallo de ese texto sigue pudiendo usar la plantilla
+// de utilidad que ya existía.
+async function deliverToAdmins(id, body, { allowTemplate = false, summary = '' } = {}) {
+  const phones = adminPhoneList();
+  if (!phones.length || !body) return { ok: false, skipped: true };
+  let delivered = 0;
+  for (const phone of phones) {
+    const window = await adminWindow(phone);
+    if (window === false) {
+      console.log(`[admin-alert] ventana de 24 h cerrada para ${phone}; no se envía #${id}`);
+      continue;
+    }
+    let textOk = false;
+    try {
+      await wa.sendText(phone, body);
+      textOk = true;
+      delivered += 1;
+    } catch (err) {
+      console.error(`[admin-alert] texto de sesión no enviado a ${phone} para #${id}: ${formatSendError(err)}`);
+    }
+    if (textOk || !allowTemplate) continue;
+    try {
+      if (typeof wa.sendTemplate !== 'function') {
+        throw new Error('este proveedor no puede enviar plantillas');
+      }
+      await wa.sendTemplate(phone, {
+        name: config.adminAlertTemplate,
+        language: 'es',
+        bodyParameters: [summary || `Solicitud #${id}`],
+      });
+      console.log(`[admin-alert] plantilla ${config.adminAlertTemplate} enviada a ${phone} para #${id}`);
+      delivered += 1;
+    } catch (err) {
+      console.error(`[admin-alert] plantilla no enviada a ${phone} para #${id}: ${formatSendError(err)}`);
+    }
+  }
+  return { ok: delivered > 0, skipped: false };
+}
+
 async function deliverBudgetWhatsapp(id, reservation) {
-  if (!config.adminPhone || !reservation?.adminText) return { ok: false, skipped: true };
+  if (!reservation?.adminText) return { ok: false, skipped: true };
   try {
     const [adminReply] = grupos.stampId([{ kind: 'text', body: reservation.adminText }], id);
     const summarySource = reservation.alertSummary || `Solicitud #{{id}}`;
     const [summaryReply] = grupos.stampId([{ kind: 'text', body: summarySource }], id);
     const summary = oneLine(summaryReply.body) || `Solicitud #${id}`;
-
-    try {
-      await wa.sendText(config.adminPhone, `${adminReply.body}\n\n${confirmacion.adminInstructions(id)}`);
-      return { ok: true, skipped: false };
-    } catch (err) {
-      console.error(`[admin-alert] texto de sesión no enviado para #${id}: ${formatSendError(err)}`);
-    }
-
-    try {
-      if (typeof wa.sendTemplate !== 'function') {
-        throw new Error('este proveedor no puede enviar plantillas');
-      }
-      await wa.sendTemplate(config.adminPhone, {
-        name: config.adminAlertTemplate,
-        language: 'es',
-        bodyParameters: [summary],
-      });
-      console.log(`[admin-alert] plantilla ${config.adminAlertTemplate} enviada para #${id}`);
-      return { ok: true, skipped: false };
-    } catch (err) {
-      console.error(`[admin-alert] plantilla no enviada para #${id}: ${formatSendError(err)}`);
-      await markAlertFailed(id);
-      return { ok: false, skipped: false };
-    }
+    const result = await deliverToAdmins(
+      id,
+      `${adminReply.body}\n\n${confirmacion.adminInstructions(id)}`,
+      { allowTemplate: true, summary }
+    );
+    if (!result.ok && !result.skipped) await markAlertFailed(id);
+    return result;
   } catch (err) {
     console.error(`[admin-alert] fallo inesperado en #${id}: ${formatSendError(err)}`);
     await markAlertFailed(id);
@@ -966,14 +1015,7 @@ async function deliverRequestEmail(alert) {
 }
 
 async function sendAdminWhatsapp(id, body) {
-  if (!config.adminPhone || !body) return { ok: false, skipped: true };
-  try {
-    await wa.sendText(config.adminPhone, body);
-    return { ok: true, skipped: false };
-  } catch (err) {
-    console.error(`[admin-alert] texto no enviado para #${id}: ${formatSendError(err)}`);
-    return { ok: false, skipped: false };
-  }
+  return deliverToAdmins(id, body, { allowTemplate: false });
 }
 
 async function rememberClientPhoto(from, session, rawMessage) {
