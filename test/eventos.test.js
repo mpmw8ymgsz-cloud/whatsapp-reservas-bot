@@ -265,7 +265,25 @@ describe('comidas de Navidad para empresas', () => {
     assert.match(intro, /21 habitaciones dobles/);
     assert.match(intro, /nombre ni el aforo de cada uno/);
     assert.match(intro, /audiovisual/);
+    assert.match(intro, /catering/);
+    assert.match(intro, /jardines/);
+    assert.match(intro, /ponentes/);
+    assert.doesNotMatch(intro, /\d+\s*€/);
     assert.doesNotMatch(intro, FORBIDDEN);
+    const english = conocimiento.congresoIntro('Hostería Don Fadrique', 'en');
+    assert.match(english, /21 double rooms/);
+    assert.match(english, /coffee breaks/i);
+    assert.match(english, /gardens/);
+    assert.match(english, /tailored quote/i);
+    assert.doesNotMatch(english, /\d+\s*€/);
+    assert.equal(conocimiento.isCongresoTopic(normalize('necesitamos el catering')), true);
+    assert.equal(conocimiento.isCongresoTopic(normalize('coffee break for the conference')), true);
+    assert.equal(conocimiento.isCongresoTopic(normalize('servicio de cáterin')), true);
+    assert.equal(conocimiento.isCongresoTopic(normalize('catering de navidad para la empresa')), false);
+    const catering = conocimiento.answerSideQuestion(normalize('¿hacéis catering fuera del hotel?'), 'congreso');
+    assert.match(catering, /sede del congreso/);
+    assert.match(catering, /21 habitaciones dobles/);
+    assert.doesNotMatch(catering, /\d+\s*€/);
     const vinos = conocimiento.answerSideQuestion('que vinos incluye el gran gala');
     assert.match(vinos, /se detallan en el presupuesto/);
     assert.match(vinos, /desde 55 € \+ IVA/);
@@ -531,7 +549,52 @@ describe('conversación', () => {
     assert.match(saved.details, /audiovisual/i);
     assert.match(saved.details, /nombre y aforo de cada salón/);
     assert.match(saved.details, /equipamiento audiovisual/);
+    assert.match(saved.details, /Comidas en la hostería: sí/);
+    assert.match(saved.details, /Habitaciones: sí/);
     assert.doesNotMatch(saved.details, FORBIDDEN);
+  });
+
+  it('el catering en inglés pide la sede y la deja en el aviso', async () => {
+    const phone = '34600000131';
+    let body = joined(await say(phone, 'Hello, we need catering for a conference'));
+    assert.match(body, /Events and congresses/);
+    assert.match(body, /21 double rooms/);
+    assert.match(body, /coffee breaks/i);
+    assert.match(body, /What company or organisation/);
+    assert.doesNotMatch(body, /\d+\s*€/);
+
+    await say(phone, 'How much is the catering?');
+    body = joined(await say(phone, 'Do you cater off site?'));
+    assert.match(body, /any other place you choose/i);
+    assert.doesNotMatch(body, /\d+\s*€/);
+
+    await say(phone, 'Salamanca Meetings');
+    await say(phone, 'Helen Clarke');
+    await say(phone, 'medical conference');
+    await say(phone, '10/05/2027 to 12/05/2027');
+    await say(phone, '220');
+    body = joined(await say(phone, 'coffee breaks and a gala dinner'));
+    assert.match(body, /Which venue or city/);
+    await say(phone, 'Palacio de Congresos, Salamanca');
+    body = joined(await say(phone, 'helen@meetings.example'));
+    assert.match(body, /Salamanca Meetings/);
+    assert.match(body, /Palacio de Congresos, Salamanca/);
+    assert.match(body, /Shall I send it like this/);
+    assert.doesNotMatch(body, /\d+\s*€/);
+
+    body = joined(await say(phone, 'send', 'emp_send'));
+    assert.match(body, /pending a quote/i);
+    const saved = reservations.at(-1);
+    assert.equal(saved.type, 'evento_congreso');
+    assert.equal(saved.status, 'pending');
+    assert.match(saved.details, /Catering en sede: sí/);
+    assert.match(saved.details, /Sede o ciudad: Palacio de Congresos, Salamanca/);
+    assert.match(saved.details, /helen@meetings\.example/);
+    const admin = sent.filter((message) => message.to === '34699999999').at(-1);
+    assert.match(admin.body, /SOLICITUD CONGRESO/);
+    assert.match(admin.body, /Catering en sede: sí/);
+    assert.match(admin.body, /Palacio de Congresos, Salamanca/);
+    assert.equal(emails.at(-1).type, 'evento_congreso');
   });
 
   it('el botón de eventos deja elegir boda, menú o congreso', async () => {

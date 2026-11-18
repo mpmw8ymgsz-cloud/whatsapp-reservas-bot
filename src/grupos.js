@@ -5,6 +5,7 @@ const conocimiento = require('./eventosConocimiento');
 const faq = require('./faqLlegada');
 const fotos = require('./fotos');
 const weddingSources = require('./weddingSources');
+const { detectLang } = require('./turoperadores');
 
 const MONTHS = {
   enero: 1,
@@ -62,12 +63,27 @@ function startOverview(business) {
   };
 }
 
+function congLang(data) {
+  return data && data.lang === 'en' ? 'en' : 'es';
+}
+
+function congText(data, es, en) {
+  return congLang(data) === 'en' ? en : es;
+}
+
 function startCongreso(business, options = {}) {
-  const replies = [text(conocimiento.congresoIntro(business.name))];
+  const lang = options.lang || (options.text ? detectLang(options.text, 'es') : 'es');
+  const replies = [text(conocimiento.congresoIntro(business.name, lang))];
   if (options.withPhotos !== false) replies.push(...fotos.presentationReplies('congreso'));
-  replies.push(text('¿A nombre de qué empresa o entidad lo preparo?'));
+  replies.push(
+    text(
+      lang === 'en'
+        ? 'What company or organisation is this for?'
+        : '¿A nombre de qué empresa o entidad lo preparo?'
+    )
+  );
   return {
-    data: base('congreso', 'company'),
+    data: base('congreso', 'company', { lang }),
     replies,
   };
 }
@@ -121,7 +137,7 @@ function startHub(business) {
           `Puedo ayudarte con tres cosas:\n` +
           `• una boda, con la hostería en exclusiva;\n` +
           `• comidas de Navidad para empresas, menú a medida (desde 55 € + IVA por persona);\n` +
-          `• un evento de empresa o un congreso (de 500 a 700 personas entre todos los espacios).\n\n` +
+          `• un evento de empresa o un congreso (de 500 a 700 personas entre todos los espacios), con catering en la sede que elijáis.\n\n` +
           `Nada queda confirmado por aquí: el equipo envía el presupuesto.`,
         HUB_BUTTONS
       ),
@@ -157,7 +173,7 @@ function parseFlexibleDate(textValue, zone) {
 function parseRange(textValue, zone) {
   const t = normalize(textValue);
   let m = t.match(
-    /(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s*(?:al|a|hasta|-|–)\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/
+    /(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s*(?:al|a|hasta|\bto\b|-|–)\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/
   );
   if (m) {
     const start = parseFlexibleDate(m[1], zone);
@@ -224,6 +240,58 @@ function parseReach(textValue, from) {
   return { email: email || null, phone: phone || from };
 }
 
+function mentionsExternalCatering(norm) {
+  return /catering|caterin|cattering|\bcater\b|coffee break|a domicilio|fuera del hotel|fuera de la hosteria|en nuestra sede|off site|off-?site|offsite|at our venue|at the venue|another venue|otro espacio|otra sede/.test(
+    norm || ''
+  );
+}
+
+function cleanVenue(value) {
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[.?!,;:]+$/g, '')
+    .trim();
+  const norm = normalize(text);
+  if (text.length < 3) return '';
+  if (/^(la hosteria|el hotel|the hotel|our venue|the venue|venue|sede|ciudad|city|nuestra sede|otro espacio|another venue|a domicilio)$/.test(norm)) {
+    return '';
+  }
+  return text.slice(0, 120);
+}
+
+function extractVenue(raw) {
+  const text = String(raw || '').replace(/\s+/g, ' ').trim();
+  const labeled = text.match(/(?:sede|venue|ciudad|city)\s*[:\-]\s*(.+)$/i);
+  if (labeled) return cleanVenue(labeled[1]);
+  const place = text.match(/\b(?:en|at|in)\s+((?:el |la |the |our )?[A-Za-zÁÉÍÓÚÑ][^,.]{2,80})/);
+  if (!place) return '';
+  return cleanVenue(place[1].replace(/^(?:el |la |the |our )\s*/i, ''));
+}
+
+function congressServices(raw) {
+  const needs = parseNeeds(raw);
+  const norm = normalize(raw);
+  const external = mentionsExternalCatering(norm);
+  const food = /comida|cena|almuerzo|\blunch\b|\bdinner\b|\bgala\b|coctel|cocktail/.test(norm);
+  const atHotel = /en la hosteria|en el hotel|at the hotel|terraza|jardin/.test(norm);
+  let hotelMeals = null;
+  if (/sin comida|no meals|without meals/.test(norm)) hotelMeals = false;
+  else if (food && (!external || atHotel)) hotelMeals = true;
+  else if (needs.meals === true && !external) hotelMeals = true;
+  let externalCatering = null;
+  if (external) externalCatering = true;
+  else if (/sin catering|no catering|without catering/.test(norm)) externalCatering = false;
+  let rooms = needs.rooms;
+  if (/ponente|comite|speaker|committee|overflow/.test(norm)) rooms = true;
+  return {
+    ...needs,
+    needsRooms: rooms,
+    hotelMeals,
+    externalCatering,
+    venue: external ? extractVenue(raw) : '',
+  };
+}
+
 function parseNeeds(textValue) {
   const raw = (textValue || '').trim();
   const n = normalize(raw);
@@ -241,7 +309,10 @@ function parseNeeds(textValue) {
 
 function looksLikeQuestion(raw) {
   const n = normalize(raw);
-  return /\?/.test(raw || '') || /^(que |cual |cuanto |cuanta |teneis |hay |podeis |puede )/.test(n);
+  return (
+    /\?/.test(raw || '') ||
+    /^(que |cual |cuanto |cuanta |teneis |hay |podeis |puede |what |where |how |do you |can you |is there )/.test(n)
+  );
 }
 
 function flag(value) {
@@ -279,6 +350,9 @@ function congresoDetails(data, from) {
     `Necesidades: ${data.needsRaw}`,
     `Comidas: ${flag(data.needsMeals)}`,
     `Habitaciones: ${flag(data.needsRooms)}`,
+    `Comidas en la hostería: ${flag(data.hotelMeals)}`,
+    `Catering en sede: ${flag(data.externalCatering)}`,
+    `Sede o ciudad: ${data.venue || '—'}`,
     `Audiovisual: ${flag(data.needsAv)}`,
     `Email: ${data.email || '—'}`,
     `Tel: ${data.phoneContact}`,
@@ -319,8 +393,48 @@ function reviewEmpresa(data, business) {
   );
 }
 
+function flagEn(value) {
+  if (value === true) return 'yes';
+  if (value === false) return 'no';
+  return 'not stated';
+}
+
+function congressServiceBlock(data) {
+  if (congLang(data) === 'en') {
+    return (
+      `🛏️ Rooms: ${flagEn(data.needsRooms)}\n` +
+      `🍽️ Meals at the hotel: ${flagEn(data.hotelMeals)}\n` +
+      `🚚 Catering at your venue: ${flagEn(data.externalCatering)}\n` +
+      `📍 Venue or city: ${data.venue || '—'}\n`
+    );
+  }
+  return (
+    `🛏️ Alojamiento: ${flag(data.needsRooms)}\n` +
+    `🍽️ Comidas en la hostería: ${flag(data.hotelMeals)}\n` +
+    `🚚 Catering en vuestra sede: ${flag(data.externalCatering)}\n` +
+    `📍 Sede o ciudad: ${data.venue || '—'}\n`
+  );
+}
+
 function reviewCongreso(data, business) {
   const fechas = data.dateEndLabel ? `${data.dateLabel} al ${data.dateEndLabel}` : data.dateLabel;
+  if (congLang(data) === 'en') {
+    return (
+      `*Event request*\n` +
+      `If you send this, the team at ${business.name} prepares a tailored quote. The date is not held.\n\n` +
+      `🏢 ${data.company}\n` +
+      `🙋 ${data.contactName}\n` +
+      `📌 ${data.eventType}\n` +
+      `📅 ${fechas}\n` +
+      `👥 ${data.partySize} attendees\n` +
+      `📝 ${data.needsRaw}\n` +
+      `${congressServiceBlock(data)}` +
+      `✉️ ${data.email || 'no email'}\n` +
+      `📱 ${data.phoneContact}\n\n` +
+      `The room, the audiovisual setup and the price are in the quote.\n\n` +
+      `Shall I send it like this?`
+    );
+  }
   return (
     `*Solicitud de evento*\n` +
     `Si la envías, el equipo de ${business.name} prepara el presupuesto. La fecha no queda reservada.\n\n` +
@@ -330,10 +444,11 @@ function reviewCongreso(data, business) {
     `📅 ${fechas}\n` +
     `👥 ${data.partySize} asistentes\n` +
     `📝 ${data.needsRaw}\n` +
+    `${congressServiceBlock(data)}` +
     `✉️ ${data.email || 'sin email'}\n` +
     `📱 ${data.phoneContact}\n\n` +
     `${trasladoLinea(data)}` +
-    `El salón concreto y el audiovisual se detallan en el presupuesto.\n\n` +
+    `El salón concreto, el audiovisual y el precio se detallan en el presupuesto.\n\n` +
     `¿La envío así?`
   );
 }
@@ -355,10 +470,21 @@ function thanksEmpresa(data, business) {
 
 function thanksCongreso(data, business) {
   const fechas = data.dateEndLabel ? `${data.dateLabel} al ${data.dateEndLabel}` : data.dateLabel;
+  if (congLang(data) === 'en') {
+    return (
+      `Thank you, ${data.contactName}. I’ve logged request no. {{id}} for *${data.company}*.\n\n` +
+      `📌 ${data.eventType}\n` +
+      `📅 ${fechas} · ${data.partySize} attendees\n` +
+      `${congressServiceBlock(data)}\n` +
+      `This stays *pending a quote*. The team at ${business.name} will write with the room, the needs and the price. The date is not held until then.\n\n` +
+      `📍 ${business.address}\n📞 ${business.phone}`
+    );
+  }
   return (
     `Gracias, ${data.contactName}. He anotado la solicitud nº {{id}} de *${data.company}*.\n\n` +
     `📌 ${data.eventType}\n` +
-    `📅 ${fechas} · ${data.partySize} asistentes\n\n` +
+    `📅 ${fechas} · ${data.partySize} asistentes\n` +
+    `${congressServiceBlock(data)}\n` +
     `Queda *pendiente de presupuesto*. El equipo de ${business.name} te escribirá para concretar sala, necesidades y precio. No reservo la fecha hasta entonces.\n\n` +
     `📍 ${business.address}\n📞 ${business.phone}`
   );
@@ -381,6 +507,10 @@ function adminCongreso(data, from) {
     `Empresa: ${data.company}\nContacto: ${data.contactName}\nTipo: ${data.eventType}\n` +
     `${fechas} · ${data.partySize} asistentes\n` +
     `Necesidades: ${data.needsRaw}\n` +
+    `Alojamiento: ${flag(data.needsRooms)}\n` +
+    `Comidas en la hostería: ${flag(data.hotelMeals)}\n` +
+    `Catering en sede: ${flag(data.externalCatering)}\n` +
+    `Sede o ciudad: ${data.venue || '—'}\n` +
     `Email: ${data.email || '—'}\nTel: ${data.phoneContact}\nWhatsApp: ${from}`;
   return appendPhotoNote(body, data);
 }
@@ -567,7 +697,7 @@ function sideOr(data, raw, prompt) {
       norm
     );
   if (!looksLikeQuestion(raw) && !faqAside) return null;
-  const side = conocimiento.answerSideQuestion(norm, data.flow);
+  const side = conocimiento.answerSideQuestion(norm, data.flow, data.lang);
   if (!side) return null;
   return stay(data, [text(`${side}\n\n${prompt}`)]);
 }
@@ -638,8 +768,8 @@ function handleBrowse(data, raw, norm, buttonId, business) {
   if (buttonId === 'emp_home') return { goHome: true, replies: [] };
   if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business, { text: raw });
   if (buttonId === 'emp_overview' || buttonId === 'emp_menus') return startOverview(business);
-  if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
-  const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
+  if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business, { text: raw });
+  const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow, data.lang) : null;
   if (side && !wantsEmpresaBooking(norm, buttonId)) {
     return stay(data, [
       text(side),
@@ -654,7 +784,7 @@ function handleBrowse(data, raw, norm, buttonId, business) {
 
 function handleHub(data, raw, norm, buttonId, business) {
   if (buttonId === 'boda_start' || conocimiento.isBodaTopic(norm)) return startBoda(business, { text: raw });
-  if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business);
+  if (buttonId === 'cong_start' || conocimiento.isCongresoTopic(norm)) return startCongreso(business, { text: raw });
   if (buttonId === 'emp_menus' || menus.isEmpresaTopic(norm)) return startOverview(business);
   const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
   if (side) {
@@ -949,7 +1079,7 @@ function handleBodaStages(data, raw, norm, buttonId, business, zone) {
     if (visit !== 'sí') {
       return stay(
         { ...data, visit, visitWhen: null, stage: 'review' },
-        [buttons(reviewFor({ ...data, visit, visitWhen: null }, business), REVIEW_BUTTONS)]
+        [buttons(reviewFor({ ...data, visit, visitWhen: null }, business), reviewButtons(data))]
       );
     }
     return stay(
@@ -965,7 +1095,7 @@ function handleBodaStages(data, raw, norm, buttonId, business, zone) {
     const slot = parseVisitSlot(raw, zone);
     if (!slot) return stay(data, [text(prompt)]);
     const next = { ...data, visitWhen: slot, stage: 'review' };
-    return stay(next, [buttons(reviewFor(next, business), REVIEW_BUTTONS)]);
+    return stay(next, [buttons(reviewFor(next, business), reviewButtons(data))]);
   }
 
   return null;
@@ -981,11 +1111,11 @@ function handle(ctx) {
   const data = { ...(ctx.data || {}) };
 
   if (wantsBodaNow(data, norm, buttonId)) return beginBoda(business, raw, norm);
-  if (wantsCongresoNow(data, norm, buttonId)) return startCongreso(business);
+  if (wantsCongresoNow(data, norm, buttonId)) return startCongreso(business, { text: raw });
 
   if (!data.stage) {
     if (buttonId === 'boda_start') return startBoda(business, { text: raw });
-    if (buttonId === 'cong_start') return startCongreso(business);
+    if (buttonId === 'cong_start') return startCongreso(business, { text: raw });
     if (
       buttonId === 'emp_menus' ||
       buttonId === 'emp_overview' ||
@@ -1022,51 +1152,108 @@ function handle(ctx) {
   if (wedding) return wedding;
 
   if (data.stage === 'company') {
-    const prompt = '¿A nombre de qué empresa o entidad lo preparo?';
+    const prompt = congText(
+      data,
+      '¿A nombre de qué empresa o entidad lo preparo?',
+      'What company or organisation is this for?'
+    );
     const side = sideOr(data, raw, prompt);
     if (side) return side;
     const company = raw.trim();
-    if (company.length < 2) return stay(data, [text('Necesito el nombre de la empresa, aunque sea breve.')]);
-    return stay({ ...data, company, stage: 'contact' }, [text('¿Y tu nombre, para dirigirme a ti?')]);
+    if (company.length < 2) {
+      return stay(data, [
+        text(congText(data, 'Necesito el nombre de la empresa, aunque sea breve.', 'I need the company name, even if it is short.')),
+      ]);
+    }
+    return stay(
+      { ...data, company, stage: 'contact' },
+      [text(congText(data, '¿Y tu nombre, para dirigirme a ti?', 'Who should we write to?'))]
+    );
   }
 
   if (data.stage === 'contact') {
-    const prompt = '¿Cómo te llamas?';
+    const prompt = congText(data, '¿Cómo te llamas?', 'Who should we write to?');
     const side = sideOr(data, raw, prompt);
     if (side) return side;
     const contactName = raw.trim();
-    if (contactName.length < 2) return stay(data, [text('Dime un nombre con el que pueda dirigirme a ti.')]);
+    if (contactName.length < 2) {
+      return stay(data, [text(congText(data, 'Dime un nombre con el que pueda dirigirme a ti.', 'Tell me a name to write to.'))]);
+    }
     const next = { ...data, contactName, stage: data.flow === 'congreso' ? 'type' : 'date' };
     const reply =
       data.flow === 'congreso'
-        ? '¿Qué tipo de evento es? Congreso, convención, jornada, presentación…'
+        ? congText(
+            data,
+            '¿Qué tipo de evento es? Congreso, convención, jornada, presentación…',
+            'What kind of event is it? A congress, a convention, a meeting…'
+          )
         : '¿Qué día de diciembre de 2026 os viene bien? Todo el mes está libre, en comida y en cena. Por ejemplo, 18/12.';
     return { data: next, customerName: contactName, replies: [text(reply)] };
   }
 
   if (data.stage === 'type') {
-    const prompt = '¿Qué tipo de evento es?';
+    const prompt = congText(data, '¿Qué tipo de evento es?', 'What kind of event is it?');
     const side = sideOr(data, raw, prompt);
     if (side) return side;
     const eventType = raw.trim();
-    if (eventType.length < 2) return stay(data, [text('Cuéntame en pocas palabras qué acto es.')]);
+    if (eventType.length < 2) {
+      return stay(data, [text(congText(data, 'Cuéntame en pocas palabras qué acto es.', 'Tell me in a few words what the event is.'))]);
+    }
     return stay(
       { ...data, eventType, stage: 'dates' },
-      [text('¿Qué día o días? Una fecha (15/03/2027) o un rango (10/03 al 12/03).')]
+      [
+        text(
+          congText(
+            data,
+            '¿Qué día o días? Una fecha (15/03/2027) o un rango (10/03 al 12/03).',
+            'Which day or days? One date (15/03/2027) or a range (10/03 to 12/03).'
+          )
+        ),
+      ]
     );
   }
 
   if (data.stage === 'dates') {
-    const prompt = '¿Qué día o días? Por ejemplo, 15/03/2027 o 10/03 al 12/03.';
+    const prompt = congText(
+      data,
+      '¿Qué día o días? Por ejemplo, 15/03/2027 o 10/03 al 12/03.',
+      'Which day or days? For example, 15/03/2027 or 10/03 to 12/03.'
+    );
     const side = sideOr(data, raw, prompt);
     if (side) return side;
     const range = parseRange(raw, zone);
-    if (!range) return stay(data, [text('No entendí la fecha. Prueba con 15/03/2027 o con 10/03 al 12/03.')]);
+    if (!range) {
+      return stay(data, [
+        text(
+          congText(
+            data,
+            'No entendí la fecha. Prueba con 15/03/2027 o con 10/03 al 12/03.',
+            'I didn’t catch the date. Try 15/03/2027 or 10/03 to 12/03.'
+          )
+        ),
+      ]);
+    }
     if (range.end && range.end < range.start) {
-      return stay(data, [text('La fecha final tiene que ser la misma o posterior al inicio.')]);
+      return stay(data, [
+        text(
+          congText(
+            data,
+            'La fecha final tiene que ser la misma o posterior al inicio.',
+            'The end date has to be the same as the start, or later.'
+          )
+        ),
+      ]);
     }
     if (!validFuture(range.start, zone, 2) || (range.end && !validFuture(range.end, zone, 2))) {
-      return stay(data, [text('Esa fecha ya pasó, o queda demasiado lejos. Dime un día a partir de hoy y dentro de los dos próximos años.')]);
+      return stay(data, [
+        text(
+          congText(
+            data,
+            'Esa fecha ya pasó, o queda demasiado lejos. Dime un día a partir de hoy y dentro de los dos próximos años.',
+            'That date has already passed, or it is too far ahead. Give me a day from today and within the next two years.'
+          )
+        ),
+      ]);
     }
     const next = {
       ...data,
@@ -1078,16 +1265,26 @@ function handle(ctx) {
     };
     const when = next.dateEndLabel ? `${next.dateLabel} al ${next.dateEndLabel}` : next.dateLabel;
     return stay(next, [
-      text(`${when}. ¿Cuántas personas asistirían? Los espacios, juntos, admiten de 500 a 700.`),
+      text(
+        congText(
+          data,
+          `${when}. ¿Cuántas personas asistirían? Los espacios, juntos, admiten de 500 a 700.`,
+          `${when}. How many people would attend? Together the spaces hold 500 to 700.`
+        )
+      ),
     ]);
   }
 
   if (data.stage === 'attendees') {
-    const prompt = '¿Cuántas personas asistirían?';
+    const prompt = congText(data, '¿Cuántas personas asistirían?', 'How many people would attend?');
     const side = sideOr(data, raw, prompt);
     if (side) return side;
     const n = parseParty(raw);
-    if (!n) return stay(data, [text('Dime el número de asistentes, por ejemplo 180.')]);
+    if (!n) {
+      return stay(data, [
+        text(congText(data, 'Dime el número de asistentes, por ejemplo 180.', 'Tell me how many people, for example 180.')),
+      ]);
+    }
     if (n > conocimiento.MAX_AFORO) {
       return stay(data, [
         text(
@@ -1096,43 +1293,44 @@ function handle(ctx) {
         ),
       ]);
     }
-    return stay(
-      { ...data, partySize: n, stage: 'needs' },
-      [
-        text(
-          `${n} asistentes. ${conocimiento.spaceHint(n)}\n\n` +
-            '¿Qué necesitáis? Puedes decirme si hay comidas o cenas, habitaciones para los asistentes ' +
-            `(hay ${conocimiento.HABITACIONES}; la tarifa se detalla en el presupuesto) y si hace falta audiovisual. ` +
-            'El equipamiento concreto no lo tengo listado.'
-        ),
-      ]
-    );
+    return stay({ ...data, partySize: n, stage: 'needs' }, [text(needsPrompt(data, n))]);
   }
 
   if (data.stage === 'needs') {
-    const prompt =
-      '¿Qué necesitáis? Comidas, habitaciones para los asistentes, audiovisual, o lo que queráis anotar.';
+    const prompt = needsPrompt(data);
     if (
       looksLikeQuestion(raw) &&
-      conocimiento.answerSideQuestion(norm, data.flow) &&
+      conocimiento.answerSideQuestion(norm, data.flow, data.lang) &&
       raw.trim().length < 80 &&
       !/,| y /.test(norm)
     ) {
-      return stay(data, [text(`${conocimiento.answerSideQuestion(norm, data.flow)}\n\n${prompt}`)]);
+      return stay(data, [text(`${conocimiento.answerSideQuestion(norm, data.flow, data.lang)}\n\n${prompt}`)]);
     }
-    const needs = parseNeeds(raw);
+    const needs = congressServices(raw);
     if (needs.raw.length < 2) return stay(data, [text(prompt)]);
-    return stay(
-      {
-        ...data,
-        needsRaw: needs.raw,
-        needsMeals: needs.meals,
-        needsRooms: needs.rooms,
-        needsAv: needs.av,
-        stage: 'reach',
-      },
-      [reachPrompt()]
-    );
+    const next = {
+      ...data,
+      needsRaw: needs.raw,
+      needsMeals: needs.meals,
+      needsRooms: needs.needsRooms,
+      needsAv: needs.av,
+      hotelMeals: needs.hotelMeals,
+      externalCatering: needs.externalCatering,
+      venue: needs.venue || null,
+    };
+    if (needs.externalCatering === true && !needs.venue) {
+      return stay({ ...next, stage: 'venue' }, [text(venuePrompt(data))]);
+    }
+    return stay({ ...next, stage: 'reach' }, [reachPromptFor(data)]);
+  }
+
+  if (data.stage === 'venue') {
+    const prompt = venuePrompt(data);
+    const side = sideOr(data, raw, prompt);
+    if (side) return side;
+    const venue = cleanVenue(raw) || raw.trim();
+    if (venue.length < 2) return stay(data, [text(prompt)]);
+    return stay({ ...data, venue: venue.slice(0, 120), stage: 'reach' }, [reachPromptFor(data)]);
   }
 
   if (data.stage === 'date') {
@@ -1243,7 +1441,7 @@ function handle(ctx) {
       phoneContact: reach.phone,
       stage: 'review',
     };
-    return stay(next, [buttons(reviewFor(next, business), REVIEW_BUTTONS)]);
+    return stay(next, [buttons(reviewFor(next, business), reviewButtons(data))]);
   }
 
   if (data.stage === 'review') {
@@ -1261,7 +1459,7 @@ function handle(ctx) {
     }
     const side = looksLikeQuestion(raw) ? conocimiento.answerSideQuestion(norm, data.flow) : null;
     if (side) {
-      return stay(data, [text(side), buttons(reviewFor(data, business), REVIEW_BUTTONS)]);
+      return stay(data, [text(side), buttons(reviewFor(data, business), reviewButtons(data))]);
     }
     return stay(data, [text('Pulsa *Enviar solicitud* si está bien, o *Corregir datos* para repetirlos.')]);
   }
@@ -1286,23 +1484,29 @@ function stagePrompt(data) {
     case 'visitwhen':
       return '¿Qué día y a qué hora os vendría bien la visita? Si aún no lo sabéis, escribid *no lo sé todavía*.';
     case 'company':
-      return '¿A nombre de qué empresa o entidad lo preparo?';
+      return congText(data, '¿A nombre de qué empresa o entidad lo preparo?', 'What company or organisation is this for?');
     case 'contact':
-      return '¿Cómo te llamas?';
+      return congText(data, '¿Cómo te llamas?', 'Who should we write to?');
     case 'type':
-      return '¿Qué tipo de evento es?';
+      return congText(data, '¿Qué tipo de evento es?', 'What kind of event is it?');
     case 'dates':
-      return '¿Qué día o días? Por ejemplo, 15/03/2027 o 10/03 al 12/03.';
+      return congText(
+        data,
+        '¿Qué día o días? Por ejemplo, 15/03/2027 o 10/03 al 12/03.',
+        'Which day or days? For example, 15/03/2027 or 10/03 to 12/03.'
+      );
     case 'attendees':
-      return '¿Cuántas personas asistirían?';
+      return congText(data, '¿Cuántas personas asistirían?', 'How many people would attend?');
     case 'needs':
-      return '¿Qué necesitáis? Comidas, habitaciones para los asistentes, audiovisual, o lo que queráis anotar.';
+      return needsPrompt(data);
+    case 'venue':
+      return venuePrompt(data);
     case 'date':
       return '¿Qué día de diciembre de 2026? Por ejemplo, 18/12.';
     case 'pax':
       return '¿Para cuántas personas? El espacio privado es desde 10.';
     case 'reach':
-      return reachPrompt().body;
+      return reachPromptFor(data).body;
     default:
       return 'Seguimos cuando quieras.';
   }
@@ -1354,7 +1558,7 @@ function faqDuringFlow(data, raw, norm, business) {
     return stay(data, [text(body), buttons('¿Queréis venir a ver la casa?', VISIT_BUTTONS)]);
   }
   if (data.stage === 'review') {
-    return stay(data, [text(body), buttons(reviewFor(data, business), REVIEW_BUTTONS)]);
+    return stay(data, [text(body), buttons(reviewFor(data, business), reviewButtons(data))]);
   }
   return stay(data, [text(`${body}\n\n${stagePrompt(data)}`)]);
 }
@@ -1365,11 +1569,52 @@ function reachPrompt() {
   );
 }
 
+function needsPrompt(data, count) {
+  const head = count
+    ? congText(data, `${count} asistentes. ${conocimiento.spaceHint(count)}\n\n`, `${count} people. ${conocimiento.spaceHint(count)}\n\n`)
+    : '';
+  const body = congText(
+    data,
+    '¿Qué necesitáis: alojamiento, comidas en la hostería, catering en vuestra sede, o las tres? ' +
+      `Hay ${conocimiento.HABITACIONES} para ponentes, comité o si los hoteles de la ciudad están llenos. ` +
+      'Las comidas de comité, ponentes o gala pueden ser aquí: terraza acristalada de 10 a 50, jardines para cócteles y cenas. ' +
+      'El catering (coffee break, comida, cóctel o cena) puede ir a la sede del congreso o a otro espacio: decidme la sede o la ciudad. ' +
+      'Si hace falta audiovisual, lo anoto; el equipamiento no lo tengo listado. El precio va en el presupuesto.',
+    'What do you need: rooms, meals at the hotel, catering at your venue, or all three? ' +
+      'There are 21 double rooms for speakers, the committee, or when city hotels are full. ' +
+      'Committee, speaker and gala meals can be here: the glazed terrace takes 10 to 50, and the gardens work for cocktails and dinners. ' +
+      'Catering (coffee breaks, lunches, cocktails or dinners) can go to the congress venue or anywhere else you choose: tell me the venue or the city. ' +
+      'If you need audiovisual, I’ll note it; I don’t have the equipment list. The price is in the quote.'
+  );
+  return head + body;
+}
+
+function venuePrompt(data) {
+  return congText(
+    data,
+    '¿En qué sede o ciudad hacemos el catering? Puede ser la sede del congreso u otro espacio.',
+    'Which venue or city should the catering go to? It can be the congress venue or another place.'
+  );
+}
+
 function reachPromptFor(data) {
   if (data && data.flow === 'boda') {
     return text('¿Os escribimos por este WhatsApp? El email es opcional. Escribid *este*, o dejad un correo.');
   }
+  if (data && data.lang === 'en') {
+    return text('Which email should we use for the quote? You can also send a phone number, or write *this* to use this WhatsApp.');
+  }
   return reachPrompt();
+}
+
+function reviewButtons(data) {
+  if (data && data.lang === 'en') {
+    return [
+      { id: 'emp_send', title: 'Send request' },
+      { id: 'emp_fix', title: 'Change details' },
+    ];
+  }
+  return REVIEW_BUTTONS;
 }
 
 function promptReplies(data, business) {
@@ -1391,7 +1636,7 @@ function promptReplies(data, business) {
       ]),
     ];
   }
-  if (data.stage === 'review') return [buttons(reviewFor(data, business), REVIEW_BUTTONS)];
+  if (data.stage === 'review') return [buttons(reviewFor(data, business), reviewButtons(data))];
   return [text(stagePrompt(data))];
 }
 
