@@ -356,7 +356,9 @@ async function sendDocumentSafe(from, document) {
 }
 
 function galleryTurn(session, normText, buttonId) {
-  if (buttonId === 'gal_si' || buttonId === 'gal_no' || buttonId === 'cong_fotos') return true;
+  if (buttonId === 'gal_si' || buttonId === 'gal_no' || buttonId === 'gal_more' || buttonId === 'gal_quote' || buttonId === 'cong_fotos') {
+    return true;
+  }
   if (session && session.step === 'GALERIA') return true;
   if (!galeria.isRequest(normText)) return false;
   if (session && session.step === STEP.NAME) return false;
@@ -364,31 +366,55 @@ function galleryTurn(session, normText, buttonId) {
   return true;
 }
 
-async function sendCateringGallery(from, lang) {
-  await wa.sendText(from, galeria.intro(lang));
-  const photos = galeria.photos();
+async function sendImagesInOrder(from, photos) {
   for (let i = 0; i < photos.length; i += 1) {
     await galeria.waitTurn(i);
     await sendImageSafe(from, photos[i]);
   }
+  if (photos.length) await galeria.waitTurn(1);
 }
 
 async function handleGallery(from, session, text, normText, buttonId) {
-  const lang = galeria.requestLang(text, (session && session.data && session.data.lang) || 'es');
+  const stored = (session && session.data) || {};
+  const lang = galeria.requestLang(text, stored.lang || 'es');
+  const inGroup = session && session.step === STEP.GRUPO;
   if (buttonId === 'gal_no' || (session && session.step === 'GALERIA' && galeria.declines(normText, buttonId))) {
     await wa.sendText(from, galeria.declined(lang));
     return showMenu(from);
   }
-  if (buttonId === 'gal_si' || (session && session.step === 'GALERIA' && galeria.wantsQuote(normText, buttonId))) {
-    return dispatchGrupo(from, grupos.startCongreso(B, { text, withPhotos: false, lang }), { text, buttonId });
+  if (!inGroup && (buttonId === 'gal_quote' || buttonId === 'gal_si' || (session && session.step === 'GALERIA' && galeria.wantsQuote(normText, buttonId)))) {
+    return dispatchGrupo(
+      from,
+      grupos.startCongreso(B, { text: stored.eventType || '', withPhotos: false, lang, seed: stored }),
+      { text, buttonId }
+    );
   }
-  if (session && session.step === 'GALERIA' && buttonId !== 'cong_fotos' && !galeria.isRequest(normText)) {
-    const card = galeria.offer(lang);
-    await wa.sendButtons(from, card.body, card.buttons);
+  if (!inGroup && (buttonId === 'gal_more' || (session && session.step === 'GALERIA' && galeria.wantsMore(normText, buttonId)))) {
+    if (!stored.seenMore) await sendImagesInOrder(from, galeria.remaining());
+    const card = galeria.moreOffer(lang);
+    const body = stored.seenMore
+      ? lang === 'en'
+        ? 'Those are all the photos. We can prepare a quote whenever you want.'
+        : 'Esas son todas las fotos. Si quieres, preparamos el presupuesto.'
+      : card.body;
+    await wa.sendButtons(from, body, card.buttons);
+    await db.setSession(from, 'GALERIA', { ...stored, flow: 'galeria', lang, seenMore: true });
     return;
   }
-  await sendCateringGallery(from, lang);
-  if (session && session.step === STEP.GRUPO) {
+  if (session && session.step === 'GALERIA') {
+    const facts = grupos.previewFacts(text, B.timezone);
+    const next = { ...stored, flow: 'galeria', lang };
+    grupos.applyCongressFacts(next, facts);
+    const reply = galeria.answer(normText, lang);
+    const ack = grupos.factAck(facts, lang);
+    const card = galeria.offer(lang);
+    const body = [reply, ack, card.body].filter(Boolean).join('\n\n');
+    await wa.sendButtons(from, body, card.buttons);
+    await db.setSession(from, 'GALERIA', next);
+    return;
+  }
+  if (inGroup) {
+    await sendImagesInOrder(from, galeria.photos());
     await wa.sendText(
       from,
       lang === 'en'
@@ -397,6 +423,8 @@ async function handleGallery(from, session, text, normText, buttonId) {
     );
     return;
   }
+  await wa.sendText(from, galeria.intro(lang));
+  await sendImagesInOrder(from, galeria.highlights());
   const card = galeria.offer(lang);
   await wa.sendButtons(from, card.body, card.buttons);
   await db.setSession(from, 'GALERIA', { flow: 'galeria', lang });
