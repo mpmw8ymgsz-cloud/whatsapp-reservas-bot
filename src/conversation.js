@@ -336,8 +336,9 @@ async function sendInfo(from) {
 // ---------- Flujo restaurante ----------
 
 function barraTurn(session, normText, buttonId) {
-  if (buttonId === 'barra_book' || buttonId === 'barra_later') return true;
+  if (buttonId === 'barra_book' || buttonId === 'barra_later' || buttonId === 'barra_question') return true;
   if (session && session.step === 'BARRA') return true;
+  if (session && session.data && session.data.barraNavidad && barra.isMenuQuestion(normText)) return true;
   if (!barra.isIntent(normText)) return false;
   if (session && session.step === STEP.NAME) return false;
   if (isCollectingOtherGroup(session)) return false;
@@ -430,30 +431,82 @@ async function handleGallery(from, session, text, normText, buttonId) {
   await db.setSession(from, 'GALERIA', { flow: 'galeria', lang });
 }
 
-async function startBarraBooking(from, lang) {
-  await db.setSession(from, STEP.DATE, { type: 'restaurante', barraNavidad: true, lang: lang || 'es' });
-  await wa.sendText(from, barra.datePrompt(lang || 'es'));
+async function startBarraBooking(from, lang, extra) {
+  await db.setSession(from, STEP.DATE, {
+    ...(extra || {}),
+    type: 'restaurante',
+    barraNavidad: true,
+    lang: lang || (extra && extra.lang) || 'es',
+  });
+  await wa.sendText(from, barra.datePrompt(lang || (extra && extra.lang) || 'es'));
+}
+
+function barraData(session, lang) {
+  const previous = (session && session.data) || {};
+  return { ...previous, type: 'restaurante', barraNavidad: true, lang: lang || previous.lang || 'es' };
+}
+
+async function showBarraButtons(from, lang, body) {
+  await wa.sendButtons(from, body || barra.follow(lang), barra.buttons(lang));
 }
 
 async function handleBarra(from, session, text, normText, buttonId) {
+  const previous = (session && session.data) || {};
+  const lang = (session && session.step === 'BARRA' && previous.lang) || barra.replies(text).lang;
+  const card = barra.replies(lang === 'en' ? 'please show the wine list' : 'la carta');
+  const onBarra = session && (session.step === 'BARRA' || previous.barraNavidad);
+
   if (buttonId === 'barra_later') {
     await db.clearSession(from);
     return showMenu(from);
   }
-  if (session && session.step === 'BARRA' && barra.wantsBooking(normText, buttonId)) {
-    return startBarraBooking(from, (session.data && session.data.lang) || 'es');
-  }
-  if (session && session.step === 'BARRA' && !barra.isIntent(normText)) {
-    const card = barra.replies(text);
-    await wa.sendButtons(from, card.offer, card.buttons);
+  if (buttonId === 'barra_question') {
+    await db.setSession(from, 'BARRA', barraData(session, lang));
+    await showBarraButtons(
+      from,
+      lang,
+      lang === 'en' ? 'Of course. Ask me, and I’ll answer from the menu.' : 'Claro. Pregúntame y te contesto con la carta.'
+    );
     return;
   }
-  const card = barra.replies(text);
-  await wa.sendText(from, card.summary);
+  if (onBarra && barra.isMenuQuestion(normText)) {
+    await wa.sendText(from, barra.answerQuestion(text));
+    if (/carta|\bmenu\b/.test(normText)) await sendDocumentSafe(from, card.document);
+    await db.setSession(from, 'BARRA', barraData(session, lang));
+    await showBarraButtons(from, lang, barra.follow(lang));
+    return;
+  }
+  if (onBarra && barra.wantsBooking(normText, buttonId)) {
+    const data = barraData(session, lang);
+    await db.setSession(from, 'BARRA', data);
+    return startBarraBooking(from, lang, data);
+  }
+  if (onBarra && session.step === 'BARRA') {
+    const note = (text || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    if (note && (barra.isSpecialNeeds(normText) || !/[?]/.test(text || ''))) {
+      const data = barraData(session, lang);
+      data.notes = note;
+      await db.setSession(from, 'BARRA', data);
+      const ack = lang === 'en' ? `Noted: ${note}` : `Lo anoto: ${note}`;
+      await showBarraButtons(from, lang, `${ack}\n\n${barra.follow(lang)}`);
+      return;
+    }
+    await db.setSession(from, 'BARRA', barraData(session, lang));
+    await showBarraButtons(
+      from,
+      lang,
+      lang === 'en'
+        ? 'I can answer from the menu, or book when you want. I won’t ask for the day yet.'
+        : 'Puedo contarte la carta, o reservar cuando queráis. Todavía no pido el día.'
+    );
+    return;
+  }
+
+  await wa.sendText(from, lang === 'en' ? barra.intro('en') : barra.intro('es'));
   await sendDocumentSafe(from, card.document);
-  await wa.sendButtons(from, card.offer, card.buttons);
-  if (barra.wantsBooking(normText, buttonId)) return startBarraBooking(from, card.lang);
-  await db.setSession(from, 'BARRA', { barraNavidad: true, lang: card.lang });
+  if (barra.isMenuQuestion(normText)) await wa.sendText(from, barra.answerQuestion(text));
+  await showBarraButtons(from, lang, barra.follow(lang));
+  await db.setSession(from, 'BARRA', barraData(session, lang));
 }
 
 async function startRestaurant(from) {
@@ -769,7 +822,7 @@ async function goToConfirm(from, session) {
   }
 
   const resumen = d.barraNavidad
-    ? `Confirma tu reserva de la *Barra de Navidad*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\nImprescindible reservar. ¿Envío la solicitud?`
+    ? `Confirma tu reserva de la *Barra de Navidad*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}${d.notes ? `\n📝 ${d.notes}` : ''}\n\nImprescindible reservar. ¿Envío la solicitud?`
     : `Confirma tu solicitud en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Envío la solicitud?`;
 
   await wa.sendButtons(from, resumen, [
@@ -796,12 +849,12 @@ async function handleConfirmStep(from, buttonId, session, text) {
         date: d.date,
         time: d.time,
         type: d.type,
-        details: ['Barra de Navidad 2026 · tapas y vinos', 'Imprescindible reservar', photoNote]
+        details: ['Barra de Navidad 2026 · tapas y vinos', 'Imprescindible reservar', d.notes ? `Atenciones: ${d.notes}` : '', photoNote]
           .filter(Boolean)
           .join(' | '),
-        customerLines: ['Barra de Navidad 2026', `${d.dateLabel} · ${d.time}`, `${d.partySize} personas`, d.name],
+        customerLines: ['Barra de Navidad 2026', `${d.dateLabel} · ${d.time}`, `${d.partySize} personas`, d.name, d.notes || ''],
         adminHeading: '🍷 BARRA DE NAVIDAD',
-        adminLines: ['Navidad 2026 · La Barra · tapas y vinos', `${d.dateLabel} ${d.time}`, `${d.partySize} personas`, photoNote],
+        adminLines: ['Navidad 2026 · La Barra · tapas y vinos', `${d.dateLabel} ${d.time}`, `${d.partySize} personas`, d.notes ? `Atenciones: ${d.notes}` : '', photoNote],
       });
       return;
     }
