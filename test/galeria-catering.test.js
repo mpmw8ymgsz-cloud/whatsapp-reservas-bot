@@ -22,9 +22,9 @@ test('la petición de la carta del correo y las fotos de catering abren la galer
   assert.equal(galeria.isRequest(normalize('menú de navidad')), false);
 });
 
-test('galeria.json trae 10 pies y el disco tiene también las fotos del correo', () => {
+test('galeria.json trae 11 pies y el disco tiene también las fotos del correo', () => {
   const photos = galeria.photos();
-  assert.equal(photos.length, 10);
+  assert.equal(photos.length, 11);
   assert.deepEqual(
     photos.map((photo) => photo.file),
     [
@@ -38,8 +38,10 @@ test('galeria.json trae 10 pies y el disco tiene también las fotos del correo',
       '08_emplatado_embutidos.jpg',
       '09_carne_conos.jpg',
       '10_comida_jardin.jpg',
+      '11_quesos_y_panes.jpg',
     ]
   );
+  assert.equal(photos[10].caption, 'Mesa de quesos y panes');
   for (const photo of photos) {
     assert.ok(photo.caption.length > 3, photo.file);
     assert.match(photo.link, new RegExp(`/galeria/catering/${photo.file}$`));

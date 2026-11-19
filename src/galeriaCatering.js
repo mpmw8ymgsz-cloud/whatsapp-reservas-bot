@@ -1,5 +1,5 @@
 // Galería de catering para congresos. Las fotos viven en public/galeria/catering
-// y se sirven en /galeria/catering/<file>.jpg. El chat manda solo las 10 de galeria.json.
+// y se sirven en /galeria/catering/<file>.jpg. El chat manda las fotos de galeria.json.
 
 const { normalize } = require('./dateParser');
 const fotos = require('./fotos');
