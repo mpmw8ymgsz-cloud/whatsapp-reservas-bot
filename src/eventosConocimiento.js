@@ -100,41 +100,32 @@ function congresoIntro(businessName, lang) {
   if (lang === 'en') {
     return (
       `🏛️ *Events and congresses at ${businessName}*\n\n` +
-      `Large events and congresses are what the house does. Together the spaces hold 500 to 700 people. ` +
-      `The glazed terrace is private, for 10 to 50. There are 21 double rooms for speakers, the committee, ` +
-      `or extra guests when the hotels in the city are full. The rate is in the quote.\n\n` +
-      `Committee, speaker and gala lunches or dinners can be at the hotel: the glazed terrace takes 10 to 50, ` +
-      `and the gardens work for cocktails and dinners.\n\n` +
-      `We also cater wherever you need it, at the congress venue itself or at another place you choose: ` +
-      `coffee breaks, lunches, cocktails or dinners.\n\n` +
-      `The team sends a tailored quote. I can’t give a price from here.\n\n` +
-      `The quote will also settle what I can’t close here:\n` +
-      `• the room (I still don’t have the name or the capacity of each one);\n` +
-      `• the audiovisual setup (I don’t have the equipment list).\n\n` +
+      `We have been catering congresses and events for more than 20 years, at the venue you choose or here. ` +
+      `Coffee breaks, lunches, cocktails or dinners: at the congress centre, another space, or the hotel.\n\n` +
+      `The glazed terrace is for 10 to 50 and the gardens work for cocktails and dinners. ` +
+      `Together the spaces hold 500 to 700 people.\n\n` +
+      `If you need them, there are 21 double rooms for speakers or when city hotels are full. ` +
+      `The team sends a tailored quote; I can’t give a price from here. ` +
+      `The room (I still don’t have the name or the capacity of each one) and the audiovisual setup go in that quote.\n\n` +
       `I’ll take the details and leave it pending a quote. The date is not held.`
     );
   }
   return (
     `🏛️ *Eventos y congresos*\n\n` +
-    `Los eventos grandes y los congresos son la especialidad de ${businessName}. ` +
-    `Los espacios, juntos, admiten ${CAPACIDAD_TOTAL}. La ${TERRAZA}. ` +
-    `Hay ${HABITACIONES} para ponentes, el comité o asistentes si los hoteles de la ciudad están llenos. ` +
-    `La tarifa de grupo se detalla en el presupuesto.\n\n` +
-    `En la hostería se pueden hacer comidas o cenas de comité, ponentes o gala. ` +
-    `La terraza acristalada es para 10 a 50, y los jardines sirven para cócteles y cenas.\n\n` +
-    `También hacemos catering donde lo necesitéis: en la sede del congreso o en otro espacio. ` +
-    `Coffee break, comida, cóctel o cena.\n\n` +
-    `El equipo lo deja en un presupuesto a medida. Por aquí no cierro precios.\n\n` +
-    `En el presupuesto el equipo concretará lo que aquí no puedo cerrar:\n` +
-    `• el salón (aún no tengo el nombre ni el aforo de cada uno);\n` +
-    `• el audiovisual (aún no tengo el equipamiento).\n\n` +
+    `Llevamos más de 20 años con el catering de congresos y eventos, en la sede que elijáis o en ${businessName}. ` +
+    `Coffee break, comida, cóctel o cena: en el Palacio de Congresos, en otro espacio o aquí.\n\n` +
+    `La terraza acristalada es para 10 a 50 y los jardines sirven para cócteles y cenas de comité o ponentes. ` +
+    `Los espacios, juntos, admiten de 500 a 700 personas.\n\n` +
+    `Si lo necesitáis, hay 21 habitaciones dobles para ponentes o cuando los hoteles de la ciudad están llenos. ` +
+    `El equipo prepara un presupuesto a medida; por aquí no cierro precios. ` +
+    `El salón (aún no tengo el nombre ni el aforo de cada uno) y el audiovisual van en ese presupuesto.\n\n` +
     `Tomo los datos y queda pendiente de presupuesto: la fecha no se reserva sola.`
   );
 }
 
 function congresoSideAnswer(norm, lang) {
   if (!norm) return null;
-  const catering = /catering|caterin|cattering|\bcater\b|coffee break|a domicilio|fuera del hotel|fuera de la hosteria|en nuestra sede|off site|off-?site|at our venue|at the venue|another venue|otro espacio|otra sede/.test(
+  const catering = /catering|caterin|cattering|\bcater\b|coffee break|a domicilio|fuera del hotel|fuera de la hosteria|en nuestra sede|off site|off-?site|at our venue|at the venue|another venue|otro espacio|otra sede|otro sitio|otro lugar/.test(
     norm
   );
   const rooms = /habitacion|alojamiento|dormir|pernoct|ponente|comite|speaker|committee|overflow|\brooms?\b/.test(norm);
@@ -259,7 +250,18 @@ function isCateringIntent(norm) {
 }
 
 function isCongresoTopic(norm) {
+  if (!norm) return false;
+  if (/navidad|nochebuena|nochevieja|noche vieja|ano nuevo/.test(norm)) return false;
   if (isCateringIntent(norm)) return true;
+  if (/\bjornadas?\b|\bsimposios?\b|\bsymposiums?\b|\bsymposia\b/.test(norm)) return true;
+  if (/\balmuerzo de trabajo\b/.test(norm)) return true;
+  if (/\bcoctel(?:es)?\b|\bcocktails?\b/.test(norm)) return true;
+  if (
+    /\b(?:comida|almuerzo|cena|lunch|dinner)s?\b/.test(norm) &&
+    /\botro sitio\b|\botro lugar\b|\botra sede\b|\botro espacio\b|\ba domicilio\b|\bfuera\b/.test(norm)
+  ) {
+    return true;
+  }
   if (
     /\bcongresos?\b|\bcongress(?:es)?\b|\bconvenciones?\b|\bconvencion\b|\bconventions?\b|\bseminarios?\b|\bseminars?\b|\bconferencias?\b|\bconferences?\b|\bmacroeventos?\b|\beventos? grandes?\b|\bgran evento\b/.test(
       norm

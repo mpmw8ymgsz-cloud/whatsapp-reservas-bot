@@ -73,20 +73,16 @@ function congText(data, es, en) {
 
 function startCongreso(business, options = {}) {
   const lang = options.lang || (options.text ? detectLang(options.text, 'es') : 'es');
+  const data = base('congreso', 'company', { lang });
+  applyCongressFacts(data, options.seed);
+  const facts = previewFacts(options.text || '', business.timezone);
+  applyCongressFacts(data, facts);
+  data.stage = congressMissing(data);
   const replies = [text(conocimiento.congresoIntro(business.name, lang))];
-  if (options.withPhotos !== false) replies.push(...fotos.presentationReplies('congreso'));
-  replies.push(
-    buttons(
-      lang === 'en'
-        ? 'What company or organisation is this for?\n\nYou can see catering photos first.'
-        : '¿A nombre de qué empresa o entidad lo preparo?\n\nSi quieres, antes puedes ver fotos del catering.',
-      [{ id: 'cong_fotos', title: lang === 'en' ? 'See photos' : 'Ver fotos' }]
-    )
-  );
-  return {
-    data: base('congreso', 'company', { lang }),
-    replies,
-  };
+  if (options.withPhotos !== false && data.stage === 'company') replies.push(...fotos.presentationReplies('congreso'));
+  const ack = factAck(facts, lang);
+  replies.push(...congressReplies(data, business, ack));
+  return { data, replies };
 }
 
 function datePrompt() {
@@ -242,7 +238,7 @@ function parseReach(textValue, from) {
 }
 
 function mentionsExternalCatering(norm) {
-  return /catering|caterin|cattering|\bcater\b|coffee break|a domicilio|fuera del hotel|fuera de la hosteria|en nuestra sede|off site|off-?site|offsite|at our venue|at the venue|another venue|otro espacio|otra sede/.test(
+  return /catering|caterin|cattering|\bcater\b|coffee break|a domicilio|fuera del hotel|fuera de la hosteria|en nuestra sede|off site|off-?site|offsite|at our venue|at the venue|another venue|otro espacio|otra sede|otro sitio|otro lugar/.test(
     norm || ''
   );
 }
@@ -254,7 +250,7 @@ function cleanVenue(value) {
     .trim();
   const norm = normalize(text);
   if (text.length < 3) return '';
-  if (/^(la hosteria|el hotel|the hotel|our venue|the venue|venue|sede|ciudad|city|nuestra sede|otro espacio|another venue|a domicilio)$/.test(norm)) {
+  if (/^(la hosteria|el hotel|the hotel|our venue|the venue|venue|sede|ciudad|city|nuestra sede|otro espacio|otro sitio|otro lugar|another venue|a domicilio)$/.test(norm)) {
     return '';
   }
   return text.slice(0, 120);
@@ -264,9 +260,12 @@ function extractVenue(raw) {
   const text = String(raw || '').replace(/\s+/g, ' ').trim();
   const labeled = text.match(/(?:sede|venue|ciudad|city)\s*[:\-]\s*(.+)$/i);
   if (labeled) return cleanVenue(labeled[1]);
-  const place = text.match(/\b(?:en|at|in)\s+((?:el |la |the |our )?[A-Za-zÁÉÍÓÚÑ][^,.]{2,80})/);
+  const place = text.match(/\b(?:en|at|in)\s+((?:el |la |the |our )?[A-Za-zÁÉÍÓÚÑ][^,.]{2,80})/i);
   if (!place) return '';
-  return cleanVenue(place[1].replace(/^(?:el |la |the |our )\s*/i, ''));
+  let chunk = place[1].split(/\s+(?:en|para|con)\s+/i)[0];
+  chunk = chunk.replace(/\s+\b(?:el|the)\s+\d.*$/i, '').trim();
+  chunk = chunk.replace(/\b(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b.*$/i, '').trim();
+  return cleanVenue(chunk.replace(/^(?:el |la |the |our )\s*/i, ''));
 }
 
 function congressServices(raw) {
@@ -1102,6 +1101,280 @@ function handleBodaStages(data, raw, norm, buttonId, business, zone) {
   return null;
 }
 
+const CONGRESS_STAGES = ['company', 'contact', 'type', 'dates', 'attendees', 'needs', 'venue', 'reach'];
+
+function isThanks(norm) {
+  return /^(?:gracias|muchas gracias|mil gracias|thank you|thanks)[.!]*$/.test(norm || '');
+}
+
+function isPriceAsk(norm) {
+  return /^(?:precio|precios|cuanto cuesta|cuanto vale|que precio|tarifa|how much|what does it cost)\b/.test(norm || '');
+}
+
+function clipLabel(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.?!]+$/g, '')
+    .slice(0, 80);
+}
+
+function serviceFrom(norm) {
+  if (/\bcoffee breaks?\b/.test(norm)) return 'café';
+  if (/\bcoctel(?:es)?\b|\bcocktails?\b/.test(norm)) return 'cóctel';
+  if (/\balmuerzo de trabajo\b/.test(norm)) return 'almuerzo de trabajo';
+  if (/\balmuerzo\b|\bcomida\b|\blunch(?:es)?\b/.test(norm)) return 'comida';
+  if (/\bcena\b|\bdinner\b/.test(norm)) return 'cena';
+  return '';
+}
+
+function eventHintFrom(norm) {
+  const service = serviceFrom(norm);
+  if (service) return service;
+  if (/\bsimposio\b|\bsymposium\b/.test(norm)) return 'simposio';
+  if (/\bjornada\b/.test(norm)) return 'jornada';
+  return '';
+}
+
+function previewFacts(raw, zone) {
+  const text = String(raw || '').replace(/\s+/g, ' ').trim();
+  const norm = normalize(text);
+  const facts = {};
+  const company = text.match(/(?:empresa|company|organisation|organization)\s*[:\-–]\s*([^,\n.]{2,80})/i);
+  if (company) facts.company = clipLabel(company[1]);
+  const contact = text.match(/(?:me llamo|mi nombre es|my name is|contacto)\s*[:\-–]?\s*([^,\n.]{2,80})/i);
+  if (contact) facts.contactName = clipLabel(contact[1]);
+  const people = text.match(/\b(\d{1,4})\s*(?:personas|asistentes|pax|comensales|people|guests)\b/i);
+  if (people) {
+    const n = parseInt(people[1], 10);
+    if (n >= 1 && n <= conocimiento.MAX_AFORO) facts.partySize = n;
+  }
+  const service = serviceFrom(norm);
+  if (service) facts.service = service;
+  const hint = eventHintFrom(norm);
+  if (hint) facts.eventHint = hint;
+  const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  if (email) facts.email = email[0];
+  if (/\ben la hosteria\b|\ben el hotel\b|\bat the hotel\b/.test(norm)) facts.venue = 'la hostería';
+  const venue = extractVenue(text);
+  if (venue) facts.venue = venue;
+  const when = parseWeddingWhen(text, zone);
+  if (when && acceptableWhen(when, zone)) facts.when = when;
+  facts.offsite = /\botro sitio\b|\botro lugar\b|\botra sede\b|\botro espacio\b|\ba domicilio\b|\bfuera del hotel\b|\bfuera de la hosteria\b|\boff site\b/.test(norm);
+  facts.cateringAsk = conocimiento.isCateringIntent(norm);
+  const scored = ['company', 'contactName', 'partySize', 'service', 'venue', 'email', 'when'].filter((key) => facts[key]);
+  facts.rich = scored.length >= 2;
+  return facts;
+}
+
+function applyCongressFacts(data, facts) {
+  if (!facts) return;
+  for (const key of ['company', 'contactName', 'eventType', 'partySize', 'venue', 'email', 'needsRaw', 'date', 'dateLabel', 'dateEnd', 'dateEndLabel', 'phoneContact']) {
+    if ((data[key] == null || data[key] === '') && facts[key] != null && facts[key] !== '') data[key] = facts[key];
+  }
+  if (facts.service && !data.eventType) data.eventType = facts.service;
+  if (facts.eventHint && !data.eventType) data.eventType = facts.eventHint;
+  if (facts.when && !data.date) {
+    data.date = facts.when.date;
+    data.dateEnd = facts.when.dateEnd || null;
+    data.dateLabel = facts.when.dateLabel;
+    data.dateEndLabel = facts.when.dateEnd ? labelDate(DateTime.fromISO(facts.when.dateEnd)) : null;
+  }
+  if (facts.email && !data.phoneContact) data.phoneContact = 'este WhatsApp';
+  if (facts.externalCatering === true) data.externalCatering = true;
+  const servedOffsite = facts.service === 'café' || facts.offsite || (facts.cateringAsk && (facts.venue || data.venue));
+  if (servedOffsite) data.externalCatering = true;
+  if (servedOffsite && !data.needsRaw) data.needsRaw = facts.service || data.eventType || 'catering';
+  if (facts.service && data.needsMeals == null && servedOffsite) data.needsMeals = true;
+}
+
+function factAck(facts, lang) {
+  if (!facts) return '';
+  const en = lang === 'en';
+  const bits = [];
+  if (facts.service || facts.eventHint) bits.push(facts.service || facts.eventHint);
+  if (facts.partySize) bits.push(en ? `about ${facts.partySize} people` : `unas ${facts.partySize} personas`);
+  if (facts.venue) bits.push(en ? `at ${facts.venue}` : `en ${facts.venue}`);
+  if (facts.when && facts.when.dateLabel) bits.push(facts.when.dateLabel);
+  if (!bits.length) return '';
+  return en ? `Noted: ${bits.join(', ')}.` : `Anoto ${bits.join(', ')}.`;
+}
+
+function congressMissing(data) {
+  if (!data.company) return 'company';
+  if (!data.contactName) return 'contact';
+  if (!data.eventType) return 'type';
+  if (!data.date) return 'dates';
+  if (!data.partySize) return 'attendees';
+  if (
+    data.needsRaw == null &&
+    data.externalCatering == null &&
+    data.hotelMeals == null &&
+    data.needsRooms == null &&
+    data.needsMeals == null
+  ) {
+    return 'needs';
+  }
+  if (data.externalCatering === true && !data.venue) return 'venue';
+  if (!data.email && !data.phoneContact) return 'reach';
+  return 'review';
+}
+
+function congressAsk(data) {
+  const lang = congLang(data);
+  if (data.stage === 'company') {
+    return congText(data, '¿A nombre de qué empresa o entidad lo preparo?', 'What company or organisation is this for?');
+  }
+  if (data.stage === 'contact') return congText(data, '¿Y tu nombre, para dirigirme a ti?', 'Who should we write to?');
+  if (data.stage === 'type') {
+    return congText(
+      data,
+      '¿Qué tipo de evento es? Congreso, convención, jornada, presentación…',
+      'What kind of event is it? A congress, a convention, a meeting…'
+    );
+  }
+  if (data.stage === 'dates') {
+    return congText(
+      data,
+      '¿Qué día o días? Una fecha (15/03/2027) o un rango (10/03 al 12/03). Si aún es aproximado, vale «mayo» o «primavera».',
+      'Which day or days? One date (15/03/2027) or a range (10/03 to 12/03). A month is fine if it is still approximate.'
+    );
+  }
+  if (data.stage === 'attendees') {
+    return congText(data, '¿Cuántas personas asistirían, aunque sea aproximado?', 'How many people would attend, even roughly?');
+  }
+  if (data.stage === 'needs') return needsPrompt(data);
+  if (data.stage === 'venue') return venuePrompt(data);
+  if (data.stage === 'reach') return reachPromptFor(data).body;
+  return congText(data, 'Seguimos cuando quieras.', 'We can continue whenever you want.');
+}
+
+function congressReplies(data, business, ack) {
+  if (data.stage === 'review') return [buttons(reviewFor(data, business), reviewButtons(data))];
+  const question = congressAsk(data);
+  const body = ack ? `${ack}\n\n${question}` : question;
+  if (data.stage === 'company') {
+    const hint = congText(
+      data,
+      'Si quieres, antes puedes ver fotos del catering.',
+      'You can see catering photos first.'
+    );
+    return [
+      buttons(`${body}\n\n${hint}`, [{ id: 'cong_fotos', title: congLang(data) === 'en' ? 'See photos' : 'Ver fotos' }]),
+    ];
+  }
+  return [text(body)];
+}
+
+function replyCongress(data, business, ack) {
+  const next = { ...data, stage: congressMissing(data) };
+  const result = { data: next, replies: congressReplies(next, business, ack) };
+  if (next.contactName) result.customerName = next.contactName;
+  return result;
+}
+
+function stepCongreso(data, raw, from, business, zone) {
+  const norm = normalize(raw);
+  const lang = congLang(data);
+  if (isThanks(norm)) {
+    const hello = lang === 'en' ? 'You’re welcome.' : 'De nada.';
+    return stay(data, [text(`${hello}\n\n${congressAsk(data)}`)]);
+  }
+  const side = sideOr(data, raw, congressAsk(data));
+  if (side) return side;
+  if (isPriceAsk(norm)) {
+    const answer = conocimiento.congresoSideAnswer(norm, lang) || conocimiento.answerSideQuestion(norm, 'congreso', lang);
+    return stay(data, [text(`${answer}\n\n${congressAsk(data)}`)]);
+  }
+
+  const facts = previewFacts(raw, zone);
+  const next = { ...data };
+  applyCongressFacts(next, facts);
+
+  if (data.stage === 'company' && !next.company) {
+    const busy = facts.partySize || facts.when || facts.venue || facts.service || facts.email || facts.eventHint;
+    const company = raw.trim();
+    if (!busy && company.length >= 2 && company.length <= 80) next.company = company;
+    else if (!busy) {
+      return stay(data, [text(congText(data, 'Necesito el nombre de la empresa, aunque sea breve.', 'I need the company name, even if it is short.'))]);
+    }
+  }
+  if (data.stage === 'contact' && !next.contactName) {
+    const name = raw.trim();
+    if (name.length >= 2 && !facts.email && !facts.when && !facts.partySize) next.contactName = name;
+    else if (!facts.contactName && name.length < 2) {
+      return stay(data, [text(congText(data, 'Dime un nombre con el que pueda dirigirme a ti.', 'Tell me a name to write to.'))]);
+    }
+  }
+  if (data.stage === 'type' && !next.eventType) {
+    const eventType = raw.trim();
+    if (eventType.length >= 2 && !facts.when) next.eventType = eventType;
+    else if (!facts.eventHint && !facts.service) {
+      return stay(data, [text(congText(data, 'Cuéntame en pocas palabras qué acto es.', 'Tell me in a few words what the event is.'))]);
+    }
+  }
+  if (data.stage === 'dates' && !next.date) {
+    return stay(data, [
+      text(
+        congText(
+          data,
+          'No entendí la fecha. Prueba con 15/03/2027, con 10/03 al 12/03, o con un mes.',
+          'I didn’t catch the date. Try 15/03/2027, 10/03 to 12/03, or a month.'
+        )
+      ),
+    ]);
+  }
+  if (data.stage === 'attendees' && !next.partySize) {
+    const n = parseParty(raw);
+    if (!n) {
+      return stay(data, [text(congText(data, 'Dime el número de asistentes, por ejemplo 180.', 'Tell me how many people, for example 180.'))]);
+    }
+    if (n > conocimiento.MAX_AFORO) {
+      return stay(data, [
+        text(
+          `Los espacios suman una capacidad de 500 a 700 personas. No puedo anotar ${n}. ` +
+            'Dime un número dentro de ese aforo y el equipo confirma cómo se reparte.'
+        ),
+      ]);
+    }
+    next.partySize = n;
+  }
+  if (data.stage === 'needs' && next.needsRaw == null && next.externalCatering == null && next.hotelMeals == null) {
+    const needs = congressServices(raw);
+    if (!needs.raw || needs.raw.length < 2) return stay(data, [text(needsPrompt(data))]);
+    next.needsRaw = needs.raw;
+    next.needsMeals = needs.meals;
+    next.needsRooms = needs.needsRooms;
+    next.needsAv = needs.av;
+    next.hotelMeals = needs.hotelMeals;
+    next.externalCatering = needs.externalCatering;
+    if (needs.venue) next.venue = needs.venue;
+  }
+  if (data.stage === 'venue' && !next.venue) {
+    const venue = cleanVenue(raw) || raw.trim();
+    if (venue.length < 2) return stay(data, [text(venuePrompt(data))]);
+    next.venue = venue.slice(0, 120);
+  }
+  if (data.stage === 'reach' && !next.email && !next.phoneContact) {
+    const reach = parseReach(raw, from);
+    if (!reach) {
+      return stay(data, [
+        text(
+          congText(
+            data,
+            'Necesito un email o un teléfono. También puedes escribir *este* para usar este WhatsApp.',
+            'I need an email or a phone number. You can also write *this* to use this WhatsApp.'
+          )
+        ),
+      ]);
+    }
+    next.email = reach.email;
+    next.phoneContact = reach.phone === from ? 'este WhatsApp' : reach.phone;
+  }
+
+  return replyCongress(next, business, factAck(facts, lang));
+}
+
 function handle(ctx) {
   const business = ctx.business;
   const zone = ctx.zone;
@@ -1151,6 +1424,10 @@ function handle(ctx) {
 
   const wedding = handleBodaStages(data, raw, norm, buttonId, business, zone);
   if (wedding) return wedding;
+
+  if (data.flow === 'congreso' && CONGRESS_STAGES.includes(data.stage)) {
+    return stepCongreso(data, raw, from, business, zone);
+  }
 
   if (data.stage === 'company') {
     const prompt = congText(
@@ -1653,6 +1930,9 @@ module.exports = {
   startIntent,
   startBoda,
   startCongreso,
+  previewFacts,
+  factAck,
+  applyCongressFacts,
   startOverview,
   isCeremonyReply,
   handle,

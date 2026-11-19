@@ -58,6 +58,13 @@ test('galeria.json trae 19 pies y el disco tiene también las fotos del correo',
   assert.equal(photos[16].caption, 'Nuestro equipo emplatando');
   assert.equal(photos[17].caption, 'Corte de jamón al aire libre');
   assert.equal(photos[18].caption, 'Tabla de quesos al corte');
+  assert.deepEqual(
+    galeria.highlights().map((photo) => photo.file),
+    ['01_mesas_y_coctel.jpg', '05_buffet_invitados.jpg', '06_comensales.jpg', '07_mesas_altas.jpg']
+  );
+  assert.equal(galeria.remaining().length, 15);
+  assert.equal(galeria.remaining()[0].file, '02_jamon_al_corte.jpg');
+  assert.equal(galeria.remaining().at(-1).file, '19_corte_de_quesos.jpg');
   for (const photo of photos) {
     assert.ok(photo.caption.length > 3, photo.file);
     assert.match(photo.link, new RegExp(`/galeria/catering/${photo.file}$`));
