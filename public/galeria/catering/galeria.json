@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "nota": "Galería del chatbot de catering para congresos. Recortes puntuales para evitar logos o nombres de terceros legibles. Los pies no nombran ningún congreso concreto.",
+  "fotos": [
+    {
+      "file": "01_mesas_y_coctel.jpg",
+      "source": "originales/14.jpg",
+      "caption": "Comida en mesa y cóctel en mesas altas",
+      "width": 1280,
+      "height": 736,
+      "kb": 289.5
+    },
+    {
+      "file": "02_jamon_al_corte.jpg",
+      "source": "originales/04.jpg",
+      "caption": "Jamón al corte",
+      "width": 1280,
+      "height": 918,
+      "kb": 199.1
+    },
+    {
+      "file": "03_servicio_caliente.jpg",
+      "source": "originales/03.jpg",
+      "caption": "Emplatado de platos calientes",
+      "width": 1280,
+      "height": 943,
+      "kb": 246.7
+    },
+    {
+      "file": "04_fruta_zumos.jpg",
+      "source": "originales/18.jpg",
+      "caption": "Estación de fruta y zumos",
+      "width": 1280,
+      "height": 853,
+      "kb": 284.6
+    },
+    {
+      "file": "05_buffet_invitados.jpg",
+      "source": "originales/12.jpg",
+      "caption": "Servicio de bufé en la sede del evento",
+      "width": 1280,
+      "height": 853,
+      "kb": 197.8
+    },
+    {
+      "file": "06_comensales.jpg",
+      "source": "originales/08.jpg",
+      "caption": "Comensales en el jardín",
+      "width": 1120,
+      "height": 1066,
+      "kb": 268.0
+    },
+    {
+      "file": "07_mesas_altas.jpg",
+      "source": "originales/06.jpg",
+      "caption": "Cóctel en mesas altas",
+      "width": 1280,
+      "height": 975,
+      "kb": 264.7
+    },
+    {
+      "file": "08_emplatado_embutidos.jpg",
+      "source": "originales/09.jpg",
+      "caption": "Emplatado de embutidos",
+      "width": 1280,
+      "height": 853,
+      "kb": 172.9
+    },
+    {
+      "file": "09_carne_conos.jpg",
+      "source": "originales/01.jpg",
+      "caption": "Carne a la brasa, servida en cono",
+      "width": 1280,
+      "height": 1130,
+      "kb": 253.9
+    },
+    {
+      "file": "10_comida_jardin.jpg",
+      "source": "originales/20.jpg",
+      "caption": "Comida en el jardín",
+      "width": 1180,
+      "height": 1066,
+      "kb": 254.9
+    }
+  ]
+}

@@ -7,6 +7,7 @@ const hotelApi = require('./hotelApi');
 const grupos = require('./grupos');
 const tours = require('./turoperadores');
 const barra = require('./barraNavidad');
+const galeria = require('./galeriaCatering');
 const faq = require('./faqLlegada');
 const marketing = require('./marketing');
 const fotos = require('./fotos');
@@ -168,6 +169,10 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
     if (which && holidayMenusNow(session, normText, which)) {
       return sendHolidayMenus(from, which, session);
     }
+  }
+
+  if (galleryTurn(session, normText, routedButton)) {
+    return handleGallery(from, session, text, normText, routedButton);
   }
 
   if (routedButton === 'ver_fotos') {
@@ -348,6 +353,53 @@ async function sendDocumentSafe(from, document) {
   } catch (err) {
     console.error(`[barra] no se pudo enviar la carta: ${formatSendError(err)}`);
   }
+}
+
+function galleryTurn(session, normText, buttonId) {
+  if (buttonId === 'gal_si' || buttonId === 'gal_no' || buttonId === 'cong_fotos') return true;
+  if (session && session.step === 'GALERIA') return true;
+  if (!galeria.isRequest(normText)) return false;
+  if (session && session.step === STEP.NAME) return false;
+  if (collectingTable(session)) return false;
+  return true;
+}
+
+async function sendCateringGallery(from, lang) {
+  await wa.sendText(from, galeria.intro(lang));
+  const photos = galeria.photos();
+  for (let i = 0; i < photos.length; i += 1) {
+    await galeria.waitTurn(i);
+    await sendImageSafe(from, photos[i]);
+  }
+}
+
+async function handleGallery(from, session, text, normText, buttonId) {
+  const lang = galeria.requestLang(text, (session && session.data && session.data.lang) || 'es');
+  if (buttonId === 'gal_no' || (session && session.step === 'GALERIA' && galeria.declines(normText, buttonId))) {
+    await wa.sendText(from, galeria.declined(lang));
+    return showMenu(from);
+  }
+  if (buttonId === 'gal_si' || (session && session.step === 'GALERIA' && galeria.wantsQuote(normText, buttonId))) {
+    return dispatchGrupo(from, grupos.startCongreso(B, { text, withPhotos: false, lang }), { text, buttonId });
+  }
+  if (session && session.step === 'GALERIA' && buttonId !== 'cong_fotos' && !galeria.isRequest(normText)) {
+    const card = galeria.offer(lang);
+    await wa.sendButtons(from, card.body, card.buttons);
+    return;
+  }
+  await sendCateringGallery(from, lang);
+  if (session && session.step === STEP.GRUPO) {
+    await wa.sendText(
+      from,
+      lang === 'en'
+        ? 'Whenever you want, we can continue with what we were noting down.'
+        : 'Cuando quieras seguimos con lo que estábamos apuntando.'
+    );
+    return;
+  }
+  const card = galeria.offer(lang);
+  await wa.sendButtons(from, card.body, card.buttons);
+  await db.setSession(from, 'GALERIA', { flow: 'galeria', lang });
 }
 
 async function startBarraBooking(from, lang) {

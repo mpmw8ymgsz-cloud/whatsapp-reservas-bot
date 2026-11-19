@@ -10,6 +10,7 @@ process.env.WHATSAPP_PROVIDER = 'meta';
 process.env.TURSO_DATABASE_URL = 'libsql://example.turso.io';
 process.env.TURSO_AUTH_TOKEN = 'test';
 process.env.ADMIN_KEY = 'test-key';
+process.env.GALERIA_PHOTO_DELAY_MS = '0';
 
 const sent = [];
 const emails = [];
@@ -1798,5 +1799,121 @@ describe('Barra de Navidad', () => {
     const messages = await say('34600000146', 'picar');
     assert.match(joined(messages), /Precios con IVA incluido/);
     assert.equal(sent.filter((message) => message.kind === 'document' && message.to === '34600000146').length, 0);
+  });
+});
+
+describe('galería de catering', () => {
+  function imagesOf(messages) {
+    return messages.filter((message) => message.kind === 'image');
+  }
+
+  it('manda las 10 fotos en orden, con el pie de galeria.json, y ofrece presupuesto', async () => {
+    const messages = await say('34600000150', 'Quiero ver la galería de catering');
+    assert.match(messages[0].body, /Aquí tienes algunas fotos de nuestros caterings/);
+    assert.match(messages[0].body, /más de 20 años/);
+    assert.doesNotMatch(joined(messages), /\d+\s*€|congreso de |seminario /i);
+    const images = imagesOf(messages);
+    assert.equal(images.length, 10);
+    assert.deepEqual(
+      images.map((image) => image.link.split('/').pop()),
+      [
+        '01_mesas_y_coctel.jpg',
+        '02_jamon_al_corte.jpg',
+        '03_servicio_caliente.jpg',
+        '04_fruta_zumos.jpg',
+        '05_buffet_invitados.jpg',
+        '06_comensales.jpg',
+        '07_mesas_altas.jpg',
+        '08_emplatado_embutidos.jpg',
+        '09_carne_conos.jpg',
+        '10_comida_jardin.jpg',
+      ]
+    );
+    assert.match(images[0].link, /\/galeria\/catering\/01_mesas_y_coctel\.jpg$/);
+    assert.equal(images[1].body, 'Jamón al corte');
+    assert.equal(images[4].body, 'Servicio de bufé en la sede del evento');
+    const offer = messages.at(-1);
+    assert.equal(offer.kind, 'buttons');
+    assert.match(offer.body, /presupuesto/);
+    assert.match(offer.body, /café, comida, cóctel o cena/);
+    assert.deepEqual(
+      offer.buttons.map((button) => button.title),
+      ['Sí', 'Ahora no']
+    );
+    assert.equal(sessions.get('34600000150').step, 'GALERIA');
+  });
+
+  it('fotos de catering y la galería en inglés también la abren; un congreso a secas, no', async () => {
+    const photos = await say('34600000151', 'quiero fotos del catering');
+    assert.equal(imagesOf(photos).length, 10);
+    const english = await say('34600000152', 'show me the catering gallery please');
+    assert.match(english[0].body, /more than 20 years/);
+    assert.equal(imagesOf(english).length, 10);
+    const congress = await say('34600000153', 'queremos un congreso');
+    assert.ok(imagesOf(congress).length <= 2);
+    assert.doesNotMatch(joined(congress), /Aquí tienes algunas fotos de nuestros caterings/);
+  });
+
+  it('Sí entra en el presupuesto de congreso y avisa a los administradores', async () => {
+    const phone = '34600000154';
+    await say(phone, 'Quiero ver la galería de catering');
+    const next = await say(phone, 'Sí', 'gal_si');
+    assert.equal(imagesOf(next).length, 0);
+    assert.match(joined(next), /empresa o entidad/);
+    assert.deepEqual(next.at(-1).buttons.map((button) => button.id), ['cong_fotos']);
+    assert.equal(sessions.get(phone).data.flow, 'congreso');
+    assert.equal(sessions.get(phone).data.stage, 'company');
+
+    await say(phone, 'Clínica del Tormes');
+    await say(phone, 'Andrés Ruiz');
+    await say(phone, 'catering de congreso');
+    await say(phone, '10/03/2027');
+    await say(phone, '80');
+    let body = joined(await say(phone, 'café y comida en otro espacio'));
+    assert.match(body, /sede|lugar|ciudad/i);
+    await say(phone, 'Palacio de Congresos');
+    body = joined(await say(phone, 'andres@clinica.es'));
+    assert.match(body, /Palacio de Congresos/);
+    assert.doesNotMatch(body, /\d+\s*€/);
+    body = joined(await say(phone, 'enviar', 'emp_send'));
+    assert.match(body, /pendiente de presupuesto/);
+    const saved = reservations.at(-1);
+    assert.equal(saved.type, 'evento_congreso');
+    assert.equal(saved.status, 'pending');
+    assert.equal(saved.partySize, 80);
+    assert.match(saved.details, /Catering en sede: sí/);
+    assert.match(saved.details, /Palacio de Congresos/);
+    const admin = sent.filter((message) => message.to === '34699999999').at(-1);
+    assert.match(admin.body, /SOLICITUD CONGRESO/);
+    assert.match(admin.body, /Palacio de Congresos/);
+    assert.equal(emails.at(-1).type, 'evento_congreso');
+  });
+
+  it('Ahora no no abre el presupuesto', async () => {
+    await say('34600000155', 'galería de catering');
+    const messages = await say('34600000155', 'Ahora no', 'gal_no');
+    assert.match(joined(messages), /congreso/);
+    assert.equal(sessions.has('34600000155'), false);
+    assert.equal(reservations.length, 0);
+  });
+
+  it('Ver fotos, dentro del congreso, manda la galería y no abandona la solicitud', async () => {
+    const phone = '34600000156';
+    const start = await say(phone, 'necesitamos catering para un congreso');
+    assert.deepEqual(start.at(-1).buttons.map((button) => button.id), ['cong_fotos']);
+    const messages = await say(phone, 'Ver fotos', 'cong_fotos');
+    assert.equal(imagesOf(messages).length, 10);
+    assert.match(joined(messages), /seguimos/);
+    assert.doesNotMatch(messages.at(-1).body, /¿Quieres que te preparemos un presupuesto/);
+    assert.equal(sessions.get(phone).data.flow, 'congreso');
+    assert.equal(sessions.get(phone).data.stage, 'company');
+  });
+
+  it('si una foto falla, el texto y la propuesta de presupuesto siguen', async () => {
+    failImages = true;
+    const messages = await say('34600000157', 'Quiero ver la galería de catering');
+    assert.match(messages[0].body, /Aquí tienes algunas fotos/);
+    assert.equal(imagesOf(messages).length, 0);
+    assert.equal(messages.at(-1).buttons.map((button) => button.id).join(','), 'gal_si,gal_no');
   });
 });
