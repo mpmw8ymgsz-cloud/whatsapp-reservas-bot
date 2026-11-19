@@ -1739,11 +1739,19 @@ describe('Barra de Navidad', () => {
     const messages = await say('34600000140', 'barra de navidad');
     const body = joined(messages);
     assert.match(body, /Navidad 2026 · La Barra/);
-    assert.match(body, /Cava, copa · 6 €/);
-    assert.match(body, /selección de champagne desde 65 €/);
+    assert.match(body, /Nuestra Gilda · 5,50 €/);
+    assert.match(body, /Croquetas de Jamón \(ud\) · 2,00 €/);
+    assert.match(body, /Albóndigas de Jabalí · Media Ración · 4,00 €/);
+    assert.match(body, /Plato de Cuchara del Día · Consultar/);
+    assert.match(body, /Díscolo Blanco · 4,80 €/);
+    assert.match(body, /Fino Tradición · 5,00 €/);
+    assert.match(body, /Far de les Plèiades · Cava · 6,00 €/);
+    assert.match(body, /Champagne desde 65,00 € \(Laurent-Perrier La Cuvée\) hasta 3\.300,00 €/);
     assert.match(body, /Precios con IVA incluido/);
-    assert.match(body, /Consulta nuestras carnes a la brasa/);
+    assert.match(body, /Consulta nuestras carnes a la brasa · Disponemos de nuestra carta general de vinos/);
     assert.match(body, /Imprescindible reservar/);
+    assert.doesNotMatch(body, /24,00 €|38,00 €|110,00 €|Dom Pérignon/);
+    assert.ok(body.length <= 4096);
     assert.doesNotMatch(body, /13:30|20:30|diciembre de 2026 está/);
     const doc = sent.find((message) => message.kind === 'document' && message.to === '34600000140');
     assert.ok(doc);
@@ -1754,8 +1762,8 @@ describe('Barra de Navidad', () => {
 
   it('detecta tapas, gilda y wine by the glass, y no el menú del 25', async () => {
     assert.match(joined(await say('34600000141', 'quiero tapas y vinos por copa')), /La Barra/);
-    assert.match(joined(await say('34600000142', 'gilda')), /6 €/);
-    assert.match(joined(await say('34600000143', 'wine by the glass and champagne')), /65 €/);
+    assert.match(joined(await say('34600000142', 'gilda')), /5,50 €/);
+    assert.match(joined(await say('34600000143', 'wine by the glass and champagne')), /65,00 €/);
     const official = joined(await say('34600000144', 'menú de navidad'));
     assert.match(official, /Menú Navidad/);
     assert.doesNotMatch(official, /La Barra/);

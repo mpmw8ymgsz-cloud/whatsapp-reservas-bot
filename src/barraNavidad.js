@@ -9,14 +9,45 @@ const config = require('./config');
 const PDF_PATH = '/carta_barra_navidad_2026.pdf';
 const PDF_FILENAME = 'Carta Barra Navidad 2026 - Don Fadrique.pdf';
 
-// Para picar, con el precio de la carta. Vacío si esa lista no está en el repo.
-const PARA_PICAR = [];
+// Transcripción de public/carta_barra_navidad_2026.pdf. Solo el precio de copa.
+const PARA_PICAR = [
+  { name: 'Trucha Ahumada al Corte con Salsa Tártara y Tosta de Pan', price: '7,50 €' },
+  { name: 'Nuestra Gilda', price: '5,50 €' },
+  { name: 'Anchoas López (2 ud) con Pan Tostado y Tomate', price: '8,00 €' },
+  { name: 'Paté Casero con Tostada de Pan y Gelatina de Vermut', price: '8,50 €' },
+  { name: 'Croquetas de Jamón (ud)', price: '2,00 €' },
+  { name: 'Albóndigas de Jabalí', price: '8,00 €' },
+  { name: 'Albóndigas de Jabalí · Media Ración', price: '4,00 €' },
+  { name: 'Caldo del Día', price: '3,00 €' },
+  { name: 'Plato de Cuchara del Día', price: 'Consultar' },
+];
 
-// Vinos y generosos, precio de la copa. Vacío si esa lista no está en el repo.
-const WINES_BY_GLASS = [];
+const BLANCOS_COPA = [
+  { name: 'Maxi', price: '5,00 €' },
+  { name: 'Alto del Tesoro', price: '6,50 €' },
+  { name: 'Díscolo Blanco', price: '4,80 €' },
+  { name: "Moscato d'Asti Vigna Senza Nome", price: '6,00 €' },
+];
 
-const CAVA_GLASS = '6 €';
-const CHAMPAGNE_FROM = '65 €';
+const TINTOS_COPA = [
+  { name: 'Cinco de Copas', price: '3,00 €' },
+  { name: 'Díscolo Tinto', price: '4,80 €' },
+  { name: 'López Cristóbal', price: '3,00 €' },
+  { name: 'Martín Lacuesta', price: '4,50 €' },
+];
+
+const JEREZ_COPA = [
+  { name: 'Fino Tradición', price: '5,00 €' },
+  { name: 'Manzanilla San León', price: '6,00 €' },
+  { name: 'Jalifa Amontillado 30 Años', price: '9,00 €' },
+  { name: 'Palo Cortado Península · Lustau', price: '8,00 €' },
+];
+
+const BURBUJAS_COPA = [
+  { name: 'Far de les Plèiades · Cava', price: '6,00 €' },
+  { name: 'Aula', price: '6,00 €' },
+  { name: 'Aula Rosado', price: '6,00 €' },
+];
 
 function fold(value) {
   return normalize(value).replace(/['’]/g, '').replace(/\s+/g, ' ').trim();
@@ -46,31 +77,30 @@ function linePrice(item) {
   return `${item.name} · ${item.price}`;
 }
 
+function section(title, items) {
+  return [title, ...items.map(linePrice), ''];
+}
+
 function summary(lang) {
   const en = lang === 'en';
-  const lines = [en ? '🍷 *Christmas 2026 · La Barra · Don Fadrique*' : '🍷 *Navidad 2026 · La Barra · Don Fadrique*', ''];
-  if (PARA_PICAR.length) {
-    lines.push(en ? '*To nibble*' : '*Para picar*');
-    for (const item of PARA_PICAR) lines.push(linePrice(item));
-    lines.push('');
-  }
-  if (WINES_BY_GLASS.length) {
-    lines.push(en ? '*Wines and sherries, by the glass*' : '*Vinos y generosos, por copa*');
-    for (const item of WINES_BY_GLASS) lines.push(linePrice(item));
-    lines.push('');
-  }
-  lines.push(en ? '*Bubbles*' : '*Burbujas*');
-  lines.push(en ? `Cava, glass · ${CAVA_GLASS}` : `Cava, copa · ${CAVA_GLASS}`);
-  lines.push(
+  const lines = [
+    en ? '🍷 *Christmas 2026 · La Barra · Don Fadrique*' : '🍷 *Navidad 2026 · La Barra · Don Fadrique*',
+    '',
+    ...section(en ? '*To nibble*' : '*Para picar*', PARA_PICAR),
+    ...section(en ? '*Whites, by the glass*' : '*Blancos, copa*', BLANCOS_COPA),
+    ...section(en ? '*Reds, by the glass*' : '*Tintos, copa*', TINTOS_COPA),
+    ...section(en ? '*Sherry, by the glass*' : '*Jerez, copa*', JEREZ_COPA),
+    ...(en ? ['*Bubbles, by the glass*'] : ['*Burbujas, copa*']),
+    ...BURBUJAS_COPA.map(linePrice),
     en
-      ? `There is a champagne selection from ${CHAMPAGNE_FROM}. The full list is available on request.`
-      : `Hay una selección de champagne desde ${CHAMPAGNE_FROM}. La lista completa, si la pides.`
-  );
-  lines.push('');
-  lines.push('Precios con IVA incluido.');
-  lines.push('Consulta nuestras carnes a la brasa.');
-  lines.push('');
-  lines.push(en ? 'A booking is essential. Imprescindible reservar.' : 'Imprescindible reservar.');
+      ? 'Champagne from 65,00 € (Laurent-Perrier La Cuvée) up to 3.300,00 €. The full list is on request.'
+      : 'Champagne desde 65,00 € (Laurent-Perrier La Cuvée) hasta 3.300,00 €. La lista completa, si la pides.',
+    '',
+    'Consulta nuestras carnes a la brasa · Disponemos de nuestra carta general de vinos, solicítela a nuestro equipo.',
+    'Precios con IVA incluido.',
+    '',
+    'Imprescindible reservar.',
+  ];
   return lines.join('\n');
 }
 
@@ -121,9 +151,10 @@ module.exports = {
   PDF_PATH,
   PDF_FILENAME,
   PARA_PICAR,
-  WINES_BY_GLASS,
-  CAVA_GLASS,
-  CHAMPAGNE_FROM,
+  BLANCOS_COPA,
+  TINTOS_COPA,
+  JEREZ_COPA,
+  BURBUJAS_COPA,
   isIntent,
   wantsBooking,
   summary,
