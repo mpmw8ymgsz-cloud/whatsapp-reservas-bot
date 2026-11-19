@@ -123,6 +123,27 @@
       "width": 1280,
       "height": 1280,
       "kb": 236.7
+    },
+    {
+      "file": "17_equipo_emplatando.jpg",
+      "caption": "Nuestro equipo emplatando",
+      "width": 1280,
+      "height": 1280,
+      "kb": 225.6
+    },
+    {
+      "file": "18_jamon_al_aire_libre.jpg",
+      "caption": "Corte de jamón al aire libre",
+      "width": 1280,
+      "height": 1280,
+      "kb": 157.8
+    },
+    {
+      "file": "19_corte_de_quesos.jpg",
+      "caption": "Tabla de quesos al corte",
+      "width": 1280,
+      "height": 1280,
+      "kb": 194.3
     }
   ]
 }
