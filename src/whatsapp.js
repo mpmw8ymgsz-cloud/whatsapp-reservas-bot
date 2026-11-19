@@ -69,6 +69,26 @@ async function sendImage(to, image) {
   return send(buildImagePayload(to, image), 'image');
 }
 
+function buildDocumentPayload(to, document = {}) {
+  if (!to) throw new Error('falta el teléfono de destino');
+  const link = document.link != null && String(document.link).trim() ? String(document.link).trim() : '';
+  const id = document.id != null && String(document.id).trim() ? String(document.id).trim() : '';
+  if (!id && !link) throw new Error('falta link o id del documento');
+  const payload = id ? { id } : { link };
+  if (document.filename) payload.filename = String(document.filename).slice(0, 240);
+  if (document.caption) payload.caption = String(document.caption).trim().slice(0, 1024);
+  return {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'document',
+    document: payload,
+  };
+}
+
+async function sendDocument(to, document) {
+  return send(buildDocumentPayload(to, document), 'document');
+}
+
 // buttons: [{ id, title }] - máximo 3 botones, título máx. 20 caracteres
 async function sendButtons(to, bodyText, buttons) {
   await send({
@@ -184,6 +204,8 @@ async function sendTemplate(to, options) {
 module.exports = {
   sendText,
   sendImage,
+  sendDocument,
+  buildDocumentPayload,
   sendButtons,
   sendList,
   markRead,

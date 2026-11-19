@@ -482,6 +482,9 @@ function createApp(onMessage, deps = {}) {
       maxAge: '7d',
     })
   );
+  app.get('/carta_barra_navidad_2026.pdf', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'carta_barra_navidad_2026.pdf'));
+  });
   const sendTemplate = deps.sendTemplate || ((to, options) => wa.sendTemplate(to, options));
   const isMarketingOptOut =
     deps.isMarketingOptOut || ((phone) => require('./db').isMarketingOptOut(phone));

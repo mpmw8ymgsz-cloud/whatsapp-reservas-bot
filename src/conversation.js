@@ -6,6 +6,7 @@ const { parseDate, parseTimeCandidates, getSlotsForDate, normalize } = require('
 const hotelApi = require('./hotelApi');
 const grupos = require('./grupos');
 const tours = require('./turoperadores');
+const barra = require('./barraNavidad');
 const faq = require('./faqLlegada');
 const marketing = require('./marketing');
 const fotos = require('./fotos');
@@ -147,6 +148,10 @@ async function handleIncoming(from, text, buttonId, rawMessage) {
       if (!session.step || session.step === STEP.IDLE) return showMenu(from);
       return;
     }
+  }
+
+  if (barraTurn(session, normText, routedButton)) {
+    return handleBarra(from, session, text, normText, routedButton);
   }
 
   const activeTour = session.step === STEP.GRUPO && session.data && session.data.flow === 'turoperador';
@@ -324,6 +329,52 @@ async function sendInfo(from) {
 }
 
 // ---------- Flujo restaurante ----------
+
+function barraTurn(session, normText, buttonId) {
+  if (buttonId === 'barra_book' || buttonId === 'barra_later') return true;
+  if (session && session.step === 'BARRA') return true;
+  if (!barra.isIntent(normText)) return false;
+  if (session && session.step === STEP.NAME) return false;
+  if (isCollectingOtherGroup(session)) return false;
+  if (collectingTable(session)) return false;
+  if (session && session.step === STEP.GRUPO && session.data && session.data.flow === 'turoperador') return false;
+  return true;
+}
+
+async function sendDocumentSafe(from, document) {
+  try {
+    if (typeof wa.sendDocument !== 'function') throw new Error('este proveedor no envía documentos');
+    await wa.sendDocument(from, document);
+  } catch (err) {
+    console.error(`[barra] no se pudo enviar la carta: ${formatSendError(err)}`);
+  }
+}
+
+async function startBarraBooking(from, lang) {
+  await db.setSession(from, STEP.DATE, { type: 'restaurante', barraNavidad: true, lang: lang || 'es' });
+  await wa.sendText(from, barra.datePrompt(lang || 'es'));
+}
+
+async function handleBarra(from, session, text, normText, buttonId) {
+  if (buttonId === 'barra_later') {
+    await db.clearSession(from);
+    return showMenu(from);
+  }
+  if (session && session.step === 'BARRA' && barra.wantsBooking(normText, buttonId)) {
+    return startBarraBooking(from, (session.data && session.data.lang) || 'es');
+  }
+  if (session && session.step === 'BARRA' && !barra.isIntent(normText)) {
+    const card = barra.replies(text);
+    await wa.sendButtons(from, card.offer, card.buttons);
+    return;
+  }
+  const card = barra.replies(text);
+  await wa.sendText(from, card.summary);
+  await sendDocumentSafe(from, card.document);
+  await wa.sendButtons(from, card.offer, card.buttons);
+  if (barra.wantsBooking(normText, buttonId)) return startBarraBooking(from, card.lang);
+  await db.setSession(from, 'BARRA', { barraNavidad: true, lang: card.lang });
+}
 
 async function startRestaurant(from) {
   await db.setSession(from, STEP.DATE, { type: 'restaurante' });
@@ -637,7 +688,9 @@ async function goToConfirm(from, session) {
     return;
   }
 
-  const resumen = `Confirma tu solicitud en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Envío la solicitud?`;
+  const resumen = d.barraNavidad
+    ? `Confirma tu reserva de la *Barra de Navidad*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\nImprescindible reservar. ¿Envío la solicitud?`
+    : `Confirma tu solicitud en el *Restaurante*:\n📅 ${d.dateLabel}\n🕐 ${d.time}\n👥 ${d.partySize} personas\n🙋 ${d.name}\n\n¿Envío la solicitud?`;
 
   await wa.sendButtons(from, resumen, [
     { id: 'confirm_yes', title: '✅ Confirmar' },
@@ -656,6 +709,22 @@ async function handleConfirmStep(from, buttonId, session, text) {
     if (d.menuId) return confirmMenuReservation(from, session);
 
     const photoNote = fotos.clientPhotoNote(d);
+    if (d.barraNavidad) {
+      await finishPendingReservation(from, {
+        name: d.name,
+        partySize: d.partySize,
+        date: d.date,
+        time: d.time,
+        type: d.type,
+        details: ['Barra de Navidad 2026 · tapas y vinos', 'Imprescindible reservar', photoNote]
+          .filter(Boolean)
+          .join(' | '),
+        customerLines: ['Barra de Navidad 2026', `${d.dateLabel} · ${d.time}`, `${d.partySize} personas`, d.name],
+        adminHeading: '🍷 BARRA DE NAVIDAD',
+        adminLines: ['Navidad 2026 · La Barra · tapas y vinos', `${d.dateLabel} ${d.time}`, `${d.partySize} personas`, photoNote],
+      });
+      return;
+    }
     await finishPendingReservation(from, {
       name: d.name,
       partySize: d.partySize,
@@ -1252,6 +1321,10 @@ async function sendReplies(from, replies) {
   for (const r of replies) {
     if (r.kind === 'image') {
       await sendImageSafe(from, r);
+      continue;
+    }
+    if (r.kind === 'document') {
+      await sendDocumentSafe(from, r);
       continue;
     }
     if (r.kind === 'buttons') await wa.sendButtons(from, r.body, r.buttons);

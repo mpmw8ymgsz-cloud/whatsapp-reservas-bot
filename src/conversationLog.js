@@ -8,6 +8,7 @@ const faq = require('./faqLlegada');
 const fotos = require('./fotos');
 const marketing = require('./marketing');
 const weddingSources = require('./weddingSources');
+const barra = require('./barraNavidad');
 const conocimiento = require('./eventosConocimiento');
 const tours = require('./turoperadores');
 
@@ -29,6 +30,7 @@ const SPECIFIC_TOPICS = new Set([
   'menu_nochevieja',
   'menu_anonuevo',
   'turoperador',
+  'barra_navidad',
 ]);
 
 const SOURCE_LABELS = {
@@ -99,6 +101,7 @@ function topicFromText(norm) {
   if (intent && intent.kind === 'congreso') return 'congreso';
   if (intent && intent.kind === 'empresa_overview') return 'navidad_empresa';
   if (intent && intent.kind === 'hub') return 'eventos';
+  if (barra.isIntent(norm)) return 'barra_navidad';
   if (menusFiesta.matchReservation(norm) || menusFiesta.matchRequest(norm)) return 'menu_fiesta';
   if (faq.isLocationQuery(norm) || faq.isTransportQuery(norm)) return 'llegada';
   if (typeof fotos.matchPhotoRequest === 'function' && fotos.matchPhotoRequest(norm)) return 'fotos';
@@ -126,6 +129,7 @@ function sessionTopic(session) {
   if (data.flow === 'empresa') return 'navidad_empresa';
   if (data.flow === 'congreso') return 'congreso';
   if (data.flow === 'hub') return 'eventos';
+  if (data.barraNavidad) return 'barra_navidad';
   if (data.menuId) return `menu_${data.menuId}`;
   if (data.type === 'hotel' || step.startsWith('HOTEL')) return 'hotel';
   if (data.type === 'restaurante' || ['DATE', 'TIME', 'PARTY', 'NAME', 'CONFIRM', 'CANCEL_SELECT'].includes(step)) {
@@ -183,6 +187,10 @@ function outboundText(payload) {
   if (!payload || typeof payload !== 'object') return '';
   if (payload.type === 'text') return (payload.text && payload.text.body) || '';
   if (payload.type === 'image') return (payload.image && payload.image.caption) || '';
+  if (payload.type === 'document') {
+    const doc = payload.document || {};
+    return doc.filename || doc.caption || 'documento';
+  }
   if (payload.type === 'interactive') {
     const interactive = payload.interactive || {};
     const body = (interactive.body && interactive.body.text) || '';

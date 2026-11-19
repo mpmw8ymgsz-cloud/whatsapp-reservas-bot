@@ -106,6 +106,16 @@ async function sendText(to, body) {
   await rememberOutbound(to, body, 'text');
 }
 
+async function sendDocument(to, document = {}) {
+  if (!document.link) throw new Error('Baileys necesita el enlace del documento');
+  await sock.sendMessage(toJid(to), {
+    document: { url: String(document.link) },
+    mimetype: 'application/pdf',
+    fileName: document.filename || 'carta.pdf',
+  });
+  await rememberOutbound(to, document.filename || '', 'document');
+}
+
 async function sendImage(to, image = {}) {
   if (!image.link) throw new Error('Baileys necesita el enlace de la imagen');
   const content = { image: { url: String(image.link) } };
@@ -145,4 +155,14 @@ function getStatus() {
   return connectionStatus;
 }
 
-module.exports = { start, sendText, sendImage, sendButtons, sendList, markRead, getQrDataUrl, getStatus };
+module.exports = {
+  start,
+  sendText,
+  sendImage,
+  sendDocument,
+  sendButtons,
+  sendList,
+  markRead,
+  getQrDataUrl,
+  getStatus,
+};

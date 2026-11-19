@@ -17,6 +17,7 @@ const sessions = new Map();
 const reservations = [];
 const optouts = new Map();
 let failAdminText = false;
+let failDocument = false;
 let failAdminTemplate = false;
 let failImages = false;
 let failWindowFor = null;
@@ -143,6 +144,16 @@ const mockWa = {
     if (failAdminTemplate) throw metaSendError('template not found', 132001);
     sent.push({ to, kind: 'template', body: options.bodyParameters.join(' '), options });
   },
+  async sendDocument(to, document) {
+    if (failDocument) throw metaSendError('Media download error', 131053);
+    sent.push({
+      to,
+      kind: 'document',
+      body: document.filename || '',
+      link: document.link || '',
+      filename: document.filename || '',
+    });
+  },
   async sendImage(to, image) {
     if (failImages) throw metaSendError('Media download error', 131053);
     sent.push({
@@ -226,6 +237,7 @@ beforeEach(() => {
   sessions.clear();
   optouts.clear();
   failAdminText = false;
+  failDocument = false;
   failAdminTemplate = false;
   failImages = false;
   failWindowFor = null;
@@ -1719,5 +1731,64 @@ describe('confirmación de Nico', () => {
     assert.match(body, /sentimos no poder aceptar/);
     assert.doesNotMatch(body, /34611222333|34600000997/);
     assert.match(body, /otra fecha/);
+  });
+});
+
+describe('Barra de Navidad', () => {
+  it('resume la carta, manda el PDF y no inventa un horario', async () => {
+    const messages = await say('34600000140', 'barra de navidad');
+    const body = joined(messages);
+    assert.match(body, /Navidad 2026 · La Barra/);
+    assert.match(body, /Cava, copa · 6 €/);
+    assert.match(body, /selección de champagne desde 65 €/);
+    assert.match(body, /Precios con IVA incluido/);
+    assert.match(body, /Consulta nuestras carnes a la brasa/);
+    assert.match(body, /Imprescindible reservar/);
+    assert.doesNotMatch(body, /13:30|20:30|diciembre de 2026 está/);
+    const doc = sent.find((message) => message.kind === 'document' && message.to === '34600000140');
+    assert.ok(doc);
+    assert.equal(doc.filename, 'Carta Barra Navidad 2026 - Don Fadrique.pdf');
+    assert.match(doc.link, /\/carta_barra_navidad_2026\.pdf$/);
+    assert.equal(messages.at(-1).buttons.map((button) => button.id).join(','), 'barra_book,barra_later');
+  });
+
+  it('detecta tapas, gilda y wine by the glass, y no el menú del 25', async () => {
+    assert.match(joined(await say('34600000141', 'quiero tapas y vinos por copa')), /La Barra/);
+    assert.match(joined(await say('34600000142', 'gilda')), /6 €/);
+    assert.match(joined(await say('34600000143', 'wine by the glass and champagne')), /65 €/);
+    const official = joined(await say('34600000144', 'menú de navidad'));
+    assert.match(official, /Menú Navidad/);
+    assert.doesNotMatch(official, /La Barra/);
+  });
+
+  it('reserva la barra con día, hora y personas, y avisa como las demás', async () => {
+    await say('34600000145', 'croquetas');
+    await say('34600000145', 'Reservar', 'barra_book');
+    let body = joined(await say('34600000145', '15/11'));
+    assert.match(body, /qué hora/i);
+    await say('34600000145', '14:00');
+    await say('34600000145', '3');
+    await say('34600000145', 'Nuria Sol');
+    body = joined(await say('34600000145', 'sí', 'confirm_yes'));
+    assert.match(body, /Barra de Navidad/);
+    assert.match(body, /pendiente de confirmación/);
+    const saved = reservations.at(-1);
+    assert.equal(saved.type, 'restaurante');
+    assert.equal(saved.status, 'pending');
+    assert.equal(saved.partySize, 3);
+    assert.equal(saved.time, '14:00');
+    assert.match(saved.details, /Barra de Navidad 2026/);
+    const admin = sent.filter((message) => message.to === '34699999999').at(-1);
+    assert.match(admin.body, /BARRA DE NAVIDAD/);
+    assert.match(admin.body, /Nuria Sol/);
+    assert.equal(emails.at(-1).type, 'restaurante');
+    assert.match(emails.at(-1).details, /Barra de Navidad 2026/);
+  });
+
+  it('si el PDF no sale, el texto de la carta sí llega', async () => {
+    failDocument = true;
+    const messages = await say('34600000146', 'picar');
+    assert.match(joined(messages), /Precios con IVA incluido/);
+    assert.equal(sent.filter((message) => message.kind === 'document' && message.to === '34600000146').length, 0);
   });
 });
