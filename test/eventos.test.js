@@ -17,6 +17,7 @@ const sessions = new Map();
 const reservations = [];
 const optouts = new Map();
 let failAdminText = false;
+let failDocument = false;
 let failAdminTemplate = false;
 let failImages = false;
 let failWindowFor = null;
@@ -143,6 +144,16 @@ const mockWa = {
     if (failAdminTemplate) throw metaSendError('template not found', 132001);
     sent.push({ to, kind: 'template', body: options.bodyParameters.join(' '), options });
   },
+  async sendDocument(to, document) {
+    if (failDocument) throw metaSendError('Media download error', 131053);
+    sent.push({
+      to,
+      kind: 'document',
+      body: document.filename || '',
+      link: document.link || '',
+      filename: document.filename || '',
+    });
+  },
   async sendImage(to, image) {
     if (failImages) throw metaSendError('Media download error', 131053);
     sent.push({
@@ -226,6 +237,7 @@ beforeEach(() => {
   sessions.clear();
   optouts.clear();
   failAdminText = false;
+  failDocument = false;
   failAdminTemplate = false;
   failImages = false;
   failWindowFor = null;
@@ -265,7 +277,25 @@ describe('comidas de Navidad para empresas', () => {
     assert.match(intro, /21 habitaciones dobles/);
     assert.match(intro, /nombre ni el aforo de cada uno/);
     assert.match(intro, /audiovisual/);
+    assert.match(intro, /catering/);
+    assert.match(intro, /jardines/);
+    assert.match(intro, /ponentes/);
+    assert.doesNotMatch(intro, /\d+\s*€/);
     assert.doesNotMatch(intro, FORBIDDEN);
+    const english = conocimiento.congresoIntro('Hostería Don Fadrique', 'en');
+    assert.match(english, /21 double rooms/);
+    assert.match(english, /coffee breaks/i);
+    assert.match(english, /gardens/);
+    assert.match(english, /tailored quote/i);
+    assert.doesNotMatch(english, /\d+\s*€/);
+    assert.equal(conocimiento.isCongresoTopic(normalize('necesitamos el catering')), true);
+    assert.equal(conocimiento.isCongresoTopic(normalize('coffee break for the conference')), true);
+    assert.equal(conocimiento.isCongresoTopic(normalize('servicio de cáterin')), true);
+    assert.equal(conocimiento.isCongresoTopic(normalize('catering de navidad para la empresa')), false);
+    const catering = conocimiento.answerSideQuestion(normalize('¿hacéis catering fuera del hotel?'), 'congreso');
+    assert.match(catering, /sede del congreso/);
+    assert.match(catering, /21 habitaciones dobles/);
+    assert.doesNotMatch(catering, /\d+\s*€/);
     const vinos = conocimiento.answerSideQuestion('que vinos incluye el gran gala');
     assert.match(vinos, /se detallan en el presupuesto/);
     assert.match(vinos, /desde 55 € \+ IVA/);
@@ -531,7 +561,52 @@ describe('conversación', () => {
     assert.match(saved.details, /audiovisual/i);
     assert.match(saved.details, /nombre y aforo de cada salón/);
     assert.match(saved.details, /equipamiento audiovisual/);
+    assert.match(saved.details, /Comidas en la hostería: sí/);
+    assert.match(saved.details, /Habitaciones: sí/);
     assert.doesNotMatch(saved.details, FORBIDDEN);
+  });
+
+  it('el catering en inglés pide la sede y la deja en el aviso', async () => {
+    const phone = '34600000131';
+    let body = joined(await say(phone, 'Hello, we need catering for a conference'));
+    assert.match(body, /Events and congresses/);
+    assert.match(body, /21 double rooms/);
+    assert.match(body, /coffee breaks/i);
+    assert.match(body, /What company or organisation/);
+    assert.doesNotMatch(body, /\d+\s*€/);
+
+    await say(phone, 'How much is the catering?');
+    body = joined(await say(phone, 'Do you cater off site?'));
+    assert.match(body, /any other place you choose/i);
+    assert.doesNotMatch(body, /\d+\s*€/);
+
+    await say(phone, 'Salamanca Meetings');
+    await say(phone, 'Helen Clarke');
+    await say(phone, 'medical conference');
+    await say(phone, '10/05/2027 to 12/05/2027');
+    await say(phone, '220');
+    body = joined(await say(phone, 'coffee breaks and a gala dinner'));
+    assert.match(body, /Which venue or city/);
+    await say(phone, 'Palacio de Congresos, Salamanca');
+    body = joined(await say(phone, 'helen@meetings.example'));
+    assert.match(body, /Salamanca Meetings/);
+    assert.match(body, /Palacio de Congresos, Salamanca/);
+    assert.match(body, /Shall I send it like this/);
+    assert.doesNotMatch(body, /\d+\s*€/);
+
+    body = joined(await say(phone, 'send', 'emp_send'));
+    assert.match(body, /pending a quote/i);
+    const saved = reservations.at(-1);
+    assert.equal(saved.type, 'evento_congreso');
+    assert.equal(saved.status, 'pending');
+    assert.match(saved.details, /Catering en sede: sí/);
+    assert.match(saved.details, /Sede o ciudad: Palacio de Congresos, Salamanca/);
+    assert.match(saved.details, /helen@meetings\.example/);
+    const admin = sent.filter((message) => message.to === '34699999999').at(-1);
+    assert.match(admin.body, /SOLICITUD CONGRESO/);
+    assert.match(admin.body, /Catering en sede: sí/);
+    assert.match(admin.body, /Palacio de Congresos, Salamanca/);
+    assert.equal(emails.at(-1).type, 'evento_congreso');
   });
 
   it('el botón de eventos deja elegir boda, menú o congreso', async () => {
@@ -1656,5 +1731,72 @@ describe('confirmación de Nico', () => {
     assert.match(body, /sentimos no poder aceptar/);
     assert.doesNotMatch(body, /34611222333|34600000997/);
     assert.match(body, /otra fecha/);
+  });
+});
+
+describe('Barra de Navidad', () => {
+  it('resume la carta, manda el PDF y no inventa un horario', async () => {
+    const messages = await say('34600000140', 'barra de navidad');
+    const body = joined(messages);
+    assert.match(body, /Navidad 2026 · La Barra/);
+    assert.match(body, /Nuestra Gilda · 5,50 €/);
+    assert.match(body, /Croquetas de Jamón \(ud\) · 2,00 €/);
+    assert.match(body, /Albóndigas de Jabalí · Media Ración · 4,00 €/);
+    assert.match(body, /Plato de Cuchara del Día · Consultar/);
+    assert.match(body, /Díscolo Blanco · 4,80 €/);
+    assert.match(body, /Fino Tradición · 5,00 €/);
+    assert.match(body, /Far de les Plèiades · Cava · 6,00 €/);
+    assert.match(body, /Champagne desde 65,00 € \(Laurent-Perrier La Cuvée\) hasta 3\.300,00 €/);
+    assert.match(body, /Precios con IVA incluido/);
+    assert.match(body, /Consulta nuestras carnes a la brasa · Disponemos de nuestra carta general de vinos/);
+    assert.match(body, /Imprescindible reservar/);
+    assert.doesNotMatch(body, /24,00 €|38,00 €|110,00 €|Dom Pérignon/);
+    assert.ok(body.length <= 4096);
+    assert.doesNotMatch(body, /13:30|20:30|diciembre de 2026 está/);
+    const doc = sent.find((message) => message.kind === 'document' && message.to === '34600000140');
+    assert.ok(doc);
+    assert.equal(doc.filename, 'Carta Barra Navidad 2026 - Don Fadrique.pdf');
+    assert.match(doc.link, /\/carta_barra_navidad_2026\.pdf$/);
+    assert.equal(messages.at(-1).buttons.map((button) => button.id).join(','), 'barra_book,barra_later');
+  });
+
+  it('detecta tapas, gilda y wine by the glass, y no el menú del 25', async () => {
+    assert.match(joined(await say('34600000141', 'quiero tapas y vinos por copa')), /La Barra/);
+    assert.match(joined(await say('34600000142', 'gilda')), /5,50 €/);
+    assert.match(joined(await say('34600000143', 'wine by the glass and champagne')), /65,00 €/);
+    const official = joined(await say('34600000144', 'menú de navidad'));
+    assert.match(official, /Menú Navidad/);
+    assert.doesNotMatch(official, /La Barra/);
+  });
+
+  it('reserva la barra con día, hora y personas, y avisa como las demás', async () => {
+    await say('34600000145', 'croquetas');
+    await say('34600000145', 'Reservar', 'barra_book');
+    let body = joined(await say('34600000145', '15/11'));
+    assert.match(body, /qué hora/i);
+    await say('34600000145', '14:00');
+    await say('34600000145', '3');
+    await say('34600000145', 'Nuria Sol');
+    body = joined(await say('34600000145', 'sí', 'confirm_yes'));
+    assert.match(body, /Barra de Navidad/);
+    assert.match(body, /pendiente de confirmación/);
+    const saved = reservations.at(-1);
+    assert.equal(saved.type, 'restaurante');
+    assert.equal(saved.status, 'pending');
+    assert.equal(saved.partySize, 3);
+    assert.equal(saved.time, '14:00');
+    assert.match(saved.details, /Barra de Navidad 2026/);
+    const admin = sent.filter((message) => message.to === '34699999999').at(-1);
+    assert.match(admin.body, /BARRA DE NAVIDAD/);
+    assert.match(admin.body, /Nuria Sol/);
+    assert.equal(emails.at(-1).type, 'restaurante');
+    assert.match(emails.at(-1).details, /Barra de Navidad 2026/);
+  });
+
+  it('si el PDF no sale, el texto de la carta sí llega', async () => {
+    failDocument = true;
+    const messages = await say('34600000146', 'picar');
+    assert.match(joined(messages), /Precios con IVA incluido/);
+    assert.equal(sent.filter((message) => message.kind === 'document' && message.to === '34600000146').length, 0);
   });
 });

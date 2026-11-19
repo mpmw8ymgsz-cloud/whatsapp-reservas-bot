@@ -4,6 +4,48 @@ function clean(value) {
   return value ? value.trim() : value;
 }
 
+// Si no hay ningún teléfono de administración, el aviso sigue yendo al de Nicolás.
+const DEFAULT_ADMIN_PHONE = '34661724158';
+
+function phoneDigits(value) {
+  if (value == null) return '';
+  let digits = String(value).trim().replace(/[\s().-]/g, '');
+  if (digits.startsWith('+')) digits = digits.slice(1);
+  else if (digits.startsWith('00')) digits = digits.slice(2);
+  return digits.replace(/\D/g, '');
+}
+
+// ADMIN_PHONES y ADMIN_PHONE aceptan uno o varios números separados por coma.
+// Ejemplo: 34600000000,+34 600 000 001. También valen espacios dentro de cada número.
+function parsePhoneList(value) {
+  if (value == null) return [];
+  const raw = String(value).trim();
+  if (!raw) return [];
+  const phones = [];
+  const seen = new Set();
+  for (const part of raw.split(/[,;]+/)) {
+    const digits = phoneDigits(part);
+    if (digits.length < 9 || digits.length > 15 || seen.has(digits)) continue;
+    seen.add(digits);
+    phones.push(digits);
+  }
+  return phones;
+}
+
+function loadAdminPhones() {
+  const phones = [];
+  const seen = new Set();
+  for (const phone of [...parsePhoneList(process.env.ADMIN_PHONES), ...parsePhoneList(process.env.ADMIN_PHONE)]) {
+    if (seen.has(phone)) continue;
+    seen.add(phone);
+    phones.push(phone);
+  }
+  if (!phones.length) phones.push(DEFAULT_ADMIN_PHONE);
+  return phones;
+}
+
+const adminPhones = loadAdminPhones();
+
 // Cabecera IMAGE de comida_navidad_empresas_2026. Pública en main para que
 // Meta pueda descargarla cuando no hay media id ni URL en el entorno.
 const DEFAULT_MARKETING_HEADER_IMAGE_URL =
@@ -15,8 +57,12 @@ module.exports = {
   metaToken: clean(process.env.META_TOKEN),
   phoneNumberId: clean(process.env.PHONE_NUMBER_ID),
   verifyToken: clean(process.env.VERIFY_TOKEN),
-  // Si ADMIN_PHONE no está en Render, avisar al WhatsApp Business de Nicolás Sánchez Monge.
-  adminPhone: clean(process.env.ADMIN_PHONE) || '34661724158',
+  // Teléfonos que reciben avisos y pueden confirmar con OK / NO.
+  // ADMIN_PHONES es la lista (coma). ADMIN_PHONE sigue valiendo para un solo número
+  // o para la misma lista. Si están las dos, se juntan sin repetir. Sin ninguna,
+  // el aviso sigue yendo al de Nicolás.
+  adminPhones,
+  adminPhone: adminPhones[0],
   // Copia por correo de cada aviso a administración. El plan gratuito de Render
   // bloquea el SMTP (puertos 25, 465 y 587); el envío va por la API HTTPS de Brevo.
   alertEmail: clean(process.env.ALERT_EMAIL) || 'reservas@donfadrique.com',

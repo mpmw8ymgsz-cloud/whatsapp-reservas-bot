@@ -21,6 +21,7 @@ const TYPE_LABEL = {
   evento_empresa: 'Comida de empresa',
   evento_congreso: 'Congreso',
   evento_boda: 'Boda',
+  evento_turoperador: 'Turoperador / grupo',
 };
 
 function businessName() {
@@ -41,8 +42,9 @@ function phoneDigits(value) {
 
 function isAdminSender(from, adminPhone) {
   const left = phoneDigits(from);
-  const right = phoneDigits(adminPhone);
-  return left !== '' && left === right;
+  if (!left) return false;
+  const list = Array.isArray(adminPhone) ? adminPhone : [adminPhone];
+  return list.some((phone) => phoneDigits(phone) === left);
 }
 
 function scrubCustomerPhone(text, phone) {
@@ -162,7 +164,18 @@ function peopleLine(row) {
   const count = row.party_size != null ? row.party_size : row.partySize;
   const n = Number(count);
   if (!Number.isFinite(n) || n <= 0) return '';
-  const noun = row.type === 'evento_boda' ? (n === 1 ? 'invitado' : 'invitados') : n === 1 ? 'persona' : 'personas';
+  const noun =
+    row.type === 'evento_boda'
+      ? n === 1
+        ? 'invitado'
+        : 'invitados'
+      : row.type === 'evento_turoperador'
+        ? n === 1
+          ? 'pasajero por grupo'
+          : 'pasajeros por grupo'
+        : n === 1
+          ? 'persona'
+          : 'personas';
   return `${n} ${noun}`;
 }
 
@@ -200,7 +213,7 @@ function alternatives(type) {
   if (type === 'hotel') {
     return `Si te encaja otra fecha, escríbenos y miramos habitación. También puedes llamar al ${PHONE} o escribir a ${EMAIL}.`;
   }
-  if (type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda') {
+  if (type === 'evento_empresa' || type === 'evento_congreso' || type === 'evento_boda' || type === 'evento_turoperador') {
     return `Si quieres, preparamos otra fecha o un formato distinto. Escríbenos por aquí, llama al ${PHONE} o escribe a ${EMAIL}.`;
   }
   return `Si quieres, miramos otra fecha, otro horario u otro menú. Escríbenos por aquí, llama al ${PHONE} o escribe a ${EMAIL}.`;

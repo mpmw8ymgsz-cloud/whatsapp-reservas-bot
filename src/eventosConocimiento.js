@@ -96,12 +96,35 @@ function bodaSideAnswer(norm) {
   return null;
 }
 
-function congresoIntro(businessName) {
+function congresoIntro(businessName, lang) {
+  if (lang === 'en') {
+    return (
+      `🏛️ *Events and congresses at ${businessName}*\n\n` +
+      `Large events and congresses are what the house does. Together the spaces hold 500 to 700 people. ` +
+      `The glazed terrace is private, for 10 to 50. There are 21 double rooms for speakers, the committee, ` +
+      `or extra guests when the hotels in the city are full. The rate is in the quote.\n\n` +
+      `Committee, speaker and gala lunches or dinners can be at the hotel: the glazed terrace takes 10 to 50, ` +
+      `and the gardens work for cocktails and dinners.\n\n` +
+      `We also cater wherever you need it, at the congress venue itself or at another place you choose: ` +
+      `coffee breaks, lunches, cocktails or dinners.\n\n` +
+      `The team sends a tailored quote. I can’t give a price from here.\n\n` +
+      `The quote will also settle what I can’t close here:\n` +
+      `• the room (I still don’t have the name or the capacity of each one);\n` +
+      `• the audiovisual setup (I don’t have the equipment list).\n\n` +
+      `I’ll take the details and leave it pending a quote. The date is not held.`
+    );
+  }
   return (
     `🏛️ *Eventos y congresos*\n\n` +
     `Los eventos grandes y los congresos son la especialidad de ${businessName}. ` +
     `Los espacios, juntos, admiten ${CAPACIDAD_TOTAL}. La ${TERRAZA}. ` +
-    `Hay ${HABITACIONES}; la tarifa de grupo se detalla en el presupuesto.\n\n` +
+    `Hay ${HABITACIONES} para ponentes, el comité o asistentes si los hoteles de la ciudad están llenos. ` +
+    `La tarifa de grupo se detalla en el presupuesto.\n\n` +
+    `En la hostería se pueden hacer comidas o cenas de comité, ponentes o gala. ` +
+    `La terraza acristalada es para 10 a 50, y los jardines sirven para cócteles y cenas.\n\n` +
+    `También hacemos catering donde lo necesitéis: en la sede del congreso o en otro espacio. ` +
+    `Coffee break, comida, cóctel o cena.\n\n` +
+    `El equipo lo deja en un presupuesto a medida. Por aquí no cierro precios.\n\n` +
     `En el presupuesto el equipo concretará lo que aquí no puedo cerrar:\n` +
     `• el salón (aún no tengo el nombre ni el aforo de cada uno);\n` +
     `• el audiovisual (aún no tengo el equipamiento).\n\n` +
@@ -109,10 +132,46 @@ function congresoIntro(businessName) {
   );
 }
 
-function answerSideQuestion(norm, flow) {
+function congresoSideAnswer(norm, lang) {
+  if (!norm) return null;
+  const catering = /catering|caterin|cattering|\bcater\b|coffee break|a domicilio|fuera del hotel|fuera de la hosteria|en nuestra sede|off site|off-?site|at our venue|at the venue|another venue|otro espacio|otra sede/.test(
+    norm
+  );
+  const rooms = /habitacion|alojamiento|dormir|pernoct|ponente|comite|speaker|committee|overflow|\brooms?\b/.test(norm);
+  const hotelMeal = /terraza|jardin|coctel|cocktail|gala|comida de comite|cena de gala|lunch|dinner/.test(norm);
+  const price = /precio|cuanto cuesta|cuanto vale|tarifa|\biva\b|how much|what does it cost|quote|rate/.test(norm);
+  const en = lang === 'en';
+  if (catering) {
+    return en
+      ? 'Yes. We cater at the congress venue or at any other place you choose: coffee breaks, lunches, cocktails or dinners. Committee, speaker and gala meals can also be here, on the glazed terrace (10 to 50) or in the gardens. There are 21 double rooms for speakers, the committee, or when city hotels are full. The price is in the tailored quote.'
+      : 'Sí. Hacemos catering en la sede del congreso o en cualquier otro espacio que elijáis: coffee break, comida, cóctel o cena. Las comidas y cenas de comité, ponentes o gala también pueden ser aquí, en la terraza acristalada (10 a 50) o en los jardines. Hay 21 habitaciones dobles para ponentes, el comité o si los hoteles de la ciudad están llenos. El precio va en el presupuesto a medida.';
+  }
+  if (rooms && !price) {
+    return en
+      ? 'There are 21 double rooms for speakers, the committee, or extra guests when the hotels in the city are full. Whether you need them, and the rate, go in the quote.'
+      : 'Hay 21 habitaciones dobles para ponentes, el comité o asistentes si los hoteles de la ciudad están llenos. Si las necesitáis, y la tarifa, van en el presupuesto.';
+  }
+  if (hotelMeal && !price) {
+    return en
+      ? 'Committee, speaker and gala lunches or dinners can be at the hotel. The glazed terrace is private, for 10 to 50, and the gardens work for cocktails and dinners. The menu and the price are in the quote.'
+      : 'Las comidas y cenas de comité, ponentes o gala pueden ser en la hostería. La terraza acristalada es privada, de 10 a 50, y los jardines sirven para cócteles y cenas. El menú y el precio van en el presupuesto.';
+  }
+  if (price) {
+    return en
+      ? 'The congress, the rooms and the catering are a tailored quote. I can’t give a rate from here.'
+      : 'El congreso, las habitaciones y el catering van en un presupuesto a medida. Por aquí no cierro tarifas.';
+  }
+  return null;
+}
+
+function answerSideQuestion(norm, flow, lang) {
   if (flow === 'boda') {
     const wedding = bodaSideAnswer(norm);
     if (wedding) return wedding;
+  }
+  if (flow === 'congreso') {
+    const congress = congresoSideAnswer(norm, lang);
+    if (congress) return congress;
   }
   if (/vino|bebida|barra libre|cava|copas?/.test(norm)) {
     return (
@@ -193,8 +252,19 @@ function isCorporateEvent(norm) {
   );
 }
 
+function isCateringIntent(norm) {
+  if (!norm) return false;
+  if (/navidad|nochebuena|nochevieja|noche vieja|ano nuevo/.test(norm)) return false;
+  return /\bcaterings?\b|\bcaterin\b|\bcattering\b|\bcoffee breaks?\b|\bservicio de catering\b/.test(norm);
+}
+
 function isCongresoTopic(norm) {
-  if (/congresos?|convenciones?|convencion|seminarios?|conferencias?|macroeventos?|eventos? grandes?|gran evento/.test(norm)) {
+  if (isCateringIntent(norm)) return true;
+  if (
+    /\bcongresos?\b|\bcongress(?:es)?\b|\bconvenciones?\b|\bconvencion\b|\bconventions?\b|\bseminarios?\b|\bseminars?\b|\bconferencias?\b|\bconferences?\b|\bmacroeventos?\b|\beventos? grandes?\b|\bgran evento\b/.test(
+      norm
+    )
+  ) {
     return true;
   }
   return isCorporateEvent(norm);
@@ -228,9 +298,11 @@ module.exports = {
   WEDDING_TRIGGER,
   bodaIntro,
   congresoIntro,
+  congresoSideAnswer,
   answerSideQuestion,
   isBodaTopic,
   isCorporateEvent,
+  isCateringIntent,
   isCongresoTopic,
   isHubTopic,
   isOtivmQuery,

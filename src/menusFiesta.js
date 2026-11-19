@@ -4,6 +4,7 @@
 
 const { normalize } = require('./dateParser');
 const conocimiento = require('./eventosConocimiento');
+const tours = require('./turoperadores');
 const fotos = require('./fotos');
 
 const ALLERGY = 'Todos nuestros menús se pueden adaptar a alergias e intolerancias.';
@@ -81,6 +82,7 @@ function tidy(text) {
 }
 
 function belongsToAnotherFlow(norm) {
+  if (tours.isInquiry(norm)) return true;
   if (conocimiento.isBodaTopic(norm) || conocimiento.isCongresoTopic(norm)) return true;
   if (/\b(?:habitaciones?|hotel|dormir|alojamiento)\b/.test(norm)) return true;
   if (/\bempresas?\b|\ba medida\b|gran gala|\bmediodia\b|presupuesto/.test(norm)) return true;

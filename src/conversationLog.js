@@ -8,7 +8,9 @@ const faq = require('./faqLlegada');
 const fotos = require('./fotos');
 const marketing = require('./marketing');
 const weddingSources = require('./weddingSources');
+const barra = require('./barraNavidad');
 const conocimiento = require('./eventosConocimiento');
+const tours = require('./turoperadores');
 
 const EMPRESA_TRIGGER = 'Quiero información para la comida de Navidad de empresa';
 const ZONE = 'Europe/Madrid';
@@ -27,6 +29,8 @@ const SPECIFIC_TOPICS = new Set([
   'menu_navidad',
   'menu_nochevieja',
   'menu_anonuevo',
+  'turoperador',
+  'barra_navidad',
 ]);
 
 const SOURCE_LABELS = {
@@ -34,6 +38,7 @@ const SOURCE_LABELS = {
   menu_navidad: 'Menú Navidad',
   menu_nochevieja: 'Menú Nochevieja',
   menu_anonuevo: 'Menú Año Nuevo',
+  turoperador: 'Turoperador / grupo',
 };
 
 function digits(value) {
@@ -61,6 +66,7 @@ function sourceTag(raw) {
   if (!text) return null;
   if (text === tidy(conocimiento.WEDDING_TRIGGER)) return weddingSources.DIRECT_SOURCE;
   if (text === tidy(EMPRESA_TRIGGER)) return 'navidad_empresa';
+  if (text === tidy(tours.TRIGGER_ES) || text === tidy(tours.TRIGGER_EN)) return 'turoperador';
   for (const menu of menusFiesta.MENUS) {
     if (text === tidy(menu.reserveText)) return `menu_${menu.id}`;
   }
@@ -82,6 +88,7 @@ function topicFromButton(buttonId) {
   if (buttonId === 'boda_start' || buttonId.startsWith('boda_')) return 'boda';
   if (buttonId === 'cong_start' || buttonId.startsWith('cong_')) return 'congreso';
   if (buttonId.startsWith('emp_')) return 'navidad_empresa';
+  if (buttonId.startsWith('top_')) return 'turoperador';
   if (buttonId === 'ver_fotos') return 'fotos';
   return '';
 }
@@ -90,9 +97,11 @@ function topicFromText(norm) {
   if (!norm) return '';
   const intent = grupos.classifyIncoming(norm);
   if (intent && intent.kind === 'boda') return 'boda';
+  if (tours.isInquiry(norm)) return 'turoperador';
   if (intent && intent.kind === 'congreso') return 'congreso';
   if (intent && intent.kind === 'empresa_overview') return 'navidad_empresa';
   if (intent && intent.kind === 'hub') return 'eventos';
+  if (barra.isIntent(norm)) return 'barra_navidad';
   if (menusFiesta.matchReservation(norm) || menusFiesta.matchRequest(norm)) return 'menu_fiesta';
   if (faq.isLocationQuery(norm) || faq.isTransportQuery(norm)) return 'llegada';
   if (typeof fotos.matchPhotoRequest === 'function' && fotos.matchPhotoRequest(norm)) return 'fotos';
@@ -115,10 +124,12 @@ function sessionTopic(session) {
   if (!session) return '';
   const data = session.data || {};
   const step = session.step || '';
+  if (data.flow === 'turoperador') return 'turoperador';
   if (data.flow === 'boda') return 'boda';
   if (data.flow === 'empresa') return 'navidad_empresa';
   if (data.flow === 'congreso') return 'congreso';
   if (data.flow === 'hub') return 'eventos';
+  if (data.barraNavidad) return 'barra_navidad';
   if (data.menuId) return `menu_${data.menuId}`;
   if (data.type === 'hotel' || step.startsWith('HOTEL')) return 'hotel';
   if (data.type === 'restaurante' || ['DATE', 'TIME', 'PARTY', 'NAME', 'CONFIRM', 'CANCEL_SELECT'].includes(step)) {
@@ -128,7 +139,7 @@ function sessionTopic(session) {
 }
 
 function detectTopic({ text, buttonId, session, phone } = {}) {
-  if (phone && confirmacion.isAdminSender(phone, config.adminPhone)) return 'admin';
+  if (phone && confirmacion.isAdminSender(phone, config.adminPhones || config.adminPhone)) return 'admin';
   const norm = normalize(text || '');
   if (marketing.isOptOut(norm, buttonId)) return 'marketing';
   if (['hola', 'menu', 'inicio', 'buenas', 'empezar', 'volver'].includes(norm)) return 'menu';
@@ -176,6 +187,10 @@ function outboundText(payload) {
   if (!payload || typeof payload !== 'object') return '';
   if (payload.type === 'text') return (payload.text && payload.text.body) || '';
   if (payload.type === 'image') return (payload.image && payload.image.caption) || '';
+  if (payload.type === 'document') {
+    const doc = payload.document || {};
+    return doc.filename || doc.caption || 'documento';
+  }
   if (payload.type === 'interactive') {
     const interactive = payload.interactive || {};
     const body = (interactive.body && interactive.body.text) || '';
