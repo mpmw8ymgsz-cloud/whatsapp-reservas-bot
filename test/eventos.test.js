@@ -1807,13 +1807,13 @@ describe('galería de catering', () => {
     return messages.filter((message) => message.kind === 'image');
   }
 
-  it('manda las 11 fotos en orden, con el pie de galeria.json, y ofrece presupuesto', async () => {
+  it('manda las 16 fotos en orden, con el pie de galeria.json, y ofrece presupuesto', async () => {
     const messages = await say('34600000150', 'Quiero ver la galería de catering');
     assert.match(messages[0].body, /Aquí tienes algunas fotos de nuestros caterings/);
     assert.match(messages[0].body, /más de 20 años/);
     assert.doesNotMatch(joined(messages), /\d+\s*€|congreso de |seminario /i);
     const images = imagesOf(messages);
-    assert.equal(images.length, 11);
+    assert.equal(images.length, 16);
     assert.deepEqual(
       images.map((image) => image.link.split('/').pop()),
       [
@@ -1828,12 +1828,22 @@ describe('galería de catering', () => {
         '09_carne_conos.jpg',
         '10_comida_jardin.jpg',
         '11_quesos_y_panes.jpg',
+        '12_chef_emplatando.jpg',
+        '13_pulpo.jpg',
+        '14_quesos_y_uvas.jpg',
+        '15_cesta_de_pan.jpg',
+        '16_fruta.jpg',
       ]
     );
     assert.match(images[0].link, /\/galeria\/catering\/01_mesas_y_coctel\.jpg$/);
     assert.equal(images[1].body, 'Jamón al corte');
     assert.equal(images[4].body, 'Servicio de bufé en la sede del evento');
     assert.equal(images[10].body, 'Mesa de quesos y panes');
+    assert.equal(images[11].body, 'Emplatado en directo');
+    assert.equal(images[12].body, 'Pulpo preparado al momento');
+    assert.equal(images[13].body, 'Quesos de la zona con uvas');
+    assert.equal(images[14].body, 'Pan recién hecho');
+    assert.equal(images[15].body, 'Composición de fruta');
     const offer = messages.at(-1);
     assert.equal(offer.kind, 'buttons');
     assert.match(offer.body, /presupuesto/);
@@ -1847,10 +1857,10 @@ describe('galería de catering', () => {
 
   it('fotos de catering y la galería en inglés también la abren; un congreso a secas, no', async () => {
     const photos = await say('34600000151', 'quiero fotos del catering');
-    assert.equal(imagesOf(photos).length, 11);
+    assert.equal(imagesOf(photos).length, 16);
     const english = await say('34600000152', 'show me the catering gallery please');
     assert.match(english[0].body, /more than 20 years/);
-    assert.equal(imagesOf(english).length, 11);
+    assert.equal(imagesOf(english).length, 16);
     const congress = await say('34600000153', 'queremos un congreso');
     assert.ok(imagesOf(congress).length <= 2);
     assert.doesNotMatch(joined(congress), /Aquí tienes algunas fotos de nuestros caterings/);
@@ -1904,7 +1914,7 @@ describe('galería de catering', () => {
     const start = await say(phone, 'necesitamos catering para un congreso');
     assert.deepEqual(start.at(-1).buttons.map((button) => button.id), ['cong_fotos']);
     const messages = await say(phone, 'Ver fotos', 'cong_fotos');
-    assert.equal(imagesOf(messages).length, 11);
+    assert.equal(imagesOf(messages).length, 16);
     assert.match(joined(messages), /seguimos/);
     assert.doesNotMatch(messages.at(-1).body, /¿Quieres que te preparemos un presupuesto/);
     assert.equal(sessions.get(phone).data.flow, 'congreso');

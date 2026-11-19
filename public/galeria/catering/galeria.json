@@ -88,6 +88,41 @@
       "width": 1152,
       "height": 852,
       "kb": 188.7
+    },
+    {
+      "file": "12_chef_emplatando.jpg",
+      "caption": "Emplatado en directo",
+      "width": 1280,
+      "height": 1280,
+      "kb": 123.9
+    },
+    {
+      "file": "13_pulpo.jpg",
+      "caption": "Pulpo preparado al momento",
+      "width": 1280,
+      "height": 1280,
+      "kb": 158.0
+    },
+    {
+      "file": "14_quesos_y_uvas.jpg",
+      "caption": "Quesos de la zona con uvas",
+      "width": 1280,
+      "height": 1280,
+      "kb": 230.0
+    },
+    {
+      "file": "15_cesta_de_pan.jpg",
+      "caption": "Pan recién hecho",
+      "width": 1280,
+      "height": 1280,
+      "kb": 107.9
+    },
+    {
+      "file": "16_fruta.jpg",
+      "caption": "Composición de fruta",
+      "width": 1280,
+      "height": 1280,
+      "kb": 236.7
     }
   ]
 }
