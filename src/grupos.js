@@ -76,10 +76,11 @@ function startCongreso(business, options = {}) {
   const replies = [text(conocimiento.congresoIntro(business.name, lang))];
   if (options.withPhotos !== false) replies.push(...fotos.presentationReplies('congreso'));
   replies.push(
-    text(
+    buttons(
       lang === 'en'
-        ? 'What company or organisation is this for?'
-        : '¿A nombre de qué empresa o entidad lo preparo?'
+        ? 'What company or organisation is this for?\n\nYou can see catering photos first.'
+        : '¿A nombre de qué empresa o entidad lo preparo?\n\nSi quieres, antes puedes ver fotos del catering.',
+      [{ id: 'cong_fotos', title: lang === 'en' ? 'See photos' : 'Ver fotos' }]
     )
   );
   return {

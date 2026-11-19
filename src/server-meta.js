@@ -476,6 +476,13 @@ function createApp(onMessage, deps = {}) {
     })
   );
   app.use(
+    '/galeria',
+    express.static(path.join(__dirname, '..', 'public', 'galeria'), {
+      index: false,
+      maxAge: '7d',
+    })
+  );
+  app.use(
     '/menus',
     express.static(path.join(__dirname, '..', 'public', 'menus'), {
       index: false,
