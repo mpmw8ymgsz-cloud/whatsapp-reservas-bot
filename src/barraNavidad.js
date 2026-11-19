@@ -70,7 +70,32 @@ function isIntent(value) {
 function wantsBooking(value, buttonId) {
   if (buttonId === 'barra_book') return true;
   const norm = fold(value);
-  return /\breserv/.test(norm) || /^(si|vale|ok|book|yes)$/.test(norm);
+  if (!norm || isMenuQuestion(norm)) return false;
+  return /\breserv/.test(norm) || /^(book|yes)$/.test(norm);
+}
+
+function isMenuQuestion(value) {
+  const norm = fold(value);
+  if (!norm) return false;
+  if (
+    /que hay|en que consiste|de que (?:va|se trata)|que es|carta|\bmenus?\b|precios?|cuanto cuesta|que incluye|que tiene|que lleva/.test(
+      norm
+    )
+  ) {
+    return true;
+  }
+  if (/gilda|croqueta|anchoa|\bpate\b|trucha|albondiga|caldo|cuchara|jerez|champan|champagne|\bcava\b|\bvino|\bcopa\b|tinto|blanco|generoso/.test(norm)) {
+    return true;
+  }
+  return false;
+}
+
+function isSpecialNeeds(value) {
+  const norm = fold(value);
+  if (!norm || isMenuQuestion(norm) || wantsBooking(norm)) return false;
+  return /alerg|intoler|celiac|gluten|\bveg|vegetarian|ninos?|infantil|accesib|silla de ruedas|movilidad|celebr|cumple|aniversario|ninguna|nada especial|sin alerg|no tengo|todo bien|sin necesidades/.test(
+    norm
+  );
 }
 
 function linePrice(item) {
@@ -104,22 +129,51 @@ function summary(lang) {
   return lines.join('\n');
 }
 
-function offer(lang) {
+function intro(lang) {
   return lang === 'en'
-    ? 'Shall I book a table for La Barra? I need the day, the time and how many people. I don’t have separate opening hours for the bar.'
-    : '¿Reservo mesa en La Barra? Necesito el día, la hora y cuántas personas. No tengo un horario propio de la barra.';
+    ? '🍷 *La Barra de Navidad* is for grazing: tapas, wines and sherries by the glass, and a champagne selection. A booking is essential. Imprescindible reservar. Here is the menu.'
+    : '🍷 *La Barra de Navidad* es para picar: tapas, vinos y jereces por copa, y una selección de champagnes. Imprescindible reservar. Te dejo la carta.';
+}
+
+function follow(lang) {
+  return lang === 'en'
+    ? 'Any special needs? Allergies or intolerances, a celebration, access, children… When you want a table, tap Book. I won’t ask for the day while you’re still asking about the menu.'
+    : '¿Hay alguna atención especial? Alergias o intolerancias, una celebración, accesibilidad, niños… Cuando queráis mesa, pulsad Reservar. No pido el día mientras sigáis preguntando por la carta.';
 }
 
 function offerButtons(lang) {
   return lang === 'en'
     ? [
         { id: 'barra_book', title: 'Book' },
-        { id: 'barra_later', title: 'Not now' },
+        { id: 'barra_question', title: 'Another question' },
       ]
     : [
         { id: 'barra_book', title: 'Reservar' },
-        { id: 'barra_later', title: 'Ahora no' },
+        { id: 'barra_question', title: 'Tengo otra pregunta' },
       ];
+}
+
+function answerQuestion(raw) {
+  const norm = fold(raw);
+  const lang = detectLang(raw || '', 'es');
+  if (/champan|champagne/.test(norm) && !/que hay|carta|\bmenu\b|precio|consiste/.test(norm)) {
+    const glasses = BURBUJAS_COPA.map(linePrice).join('\n');
+    const range =
+      lang === 'en'
+        ? 'Champagne from 65,00 € (Laurent-Perrier La Cuvée) up to 3.300,00 €. The full list is on request.'
+        : 'Champagne desde 65,00 € (Laurent-Perrier La Cuvée) hasta 3.300,00 €. La lista completa, si la pides.';
+    return `${glasses}\n${range}\n\nPrecios con IVA incluido.`;
+  }
+  const broad = /que hay|en que consiste|de que (?:va|se trata)|que es|carta|\bmenus?\b|precios?|cuanto cuesta|que incluye|que tiene|que lleva/.test(norm);
+  if (!broad) {
+    const all = [...PARA_PICAR, ...BLANCOS_COPA, ...TINTOS_COPA, ...JEREZ_COPA, ...BURBUJAS_COPA];
+    const hits = all.filter((item) => {
+      const name = fold(item.name);
+      return name.split(' ').some((word) => word.length > 3 && norm.includes(word));
+    });
+    if (hits.length) return `${hits.map(linePrice).join('\n')}\n\nPrecios con IVA incluido.`;
+  }
+  return summary(lang);
 }
 
 function datePrompt(lang) {
@@ -137,8 +191,9 @@ function replies(raw) {
   const lang = detectLang(raw || '', 'es');
   return {
     lang,
+    intro: intro(lang),
     summary: summary(lang),
-    offer: offer(lang),
+    follow: follow(lang),
     buttons: offerButtons(lang),
     document: {
       link: documentLink(),
@@ -157,8 +212,13 @@ module.exports = {
   BURBUJAS_COPA,
   isIntent,
   wantsBooking,
+  isMenuQuestion,
+  isSpecialNeeds,
   summary,
-  offer,
+  intro,
+  follow,
+  buttons: offerButtons,
+  answerQuestion,
   datePrompt,
   documentLink,
   replies,

@@ -1736,29 +1736,53 @@ describe('confirmación de Nico', () => {
 });
 
 describe('Barra de Navidad', () => {
-  it('resume la carta, manda el PDF y no inventa un horario', async () => {
+  it('presenta la barra, manda el PDF y no pide el día', async () => {
     const messages = await say('34600000140', 'barra de navidad');
     const body = joined(messages);
-    assert.match(body, /Navidad 2026 · La Barra/);
-    assert.match(body, /Nuestra Gilda · 5,50 €/);
-    assert.match(body, /Croquetas de Jamón \(ud\) · 2,00 €/);
-    assert.match(body, /Albóndigas de Jabalí · Media Ración · 4,00 €/);
-    assert.match(body, /Plato de Cuchara del Día · Consultar/);
-    assert.match(body, /Díscolo Blanco · 4,80 €/);
-    assert.match(body, /Fino Tradición · 5,00 €/);
-    assert.match(body, /Far de les Plèiades · Cava · 6,00 €/);
-    assert.match(body, /Champagne desde 65,00 € \(Laurent-Perrier La Cuvée\) hasta 3\.300,00 €/);
-    assert.match(body, /Precios con IVA incluido/);
-    assert.match(body, /Consulta nuestras carnes a la brasa · Disponemos de nuestra carta general de vinos/);
+    assert.match(body, /La Barra de Navidad/);
+    assert.match(body, /tapas/);
+    assert.match(body, /vinos y jereces por copa/);
+    assert.match(body, /champagnes/);
     assert.match(body, /Imprescindible reservar/);
+    assert.match(body, /atención especial/i);
+    assert.doesNotMatch(body, /Para qué día|Necesito el día|13:30|20:30/);
     assert.doesNotMatch(body, /24,00 €|38,00 €|110,00 €|Dom Pérignon/);
-    assert.ok(body.length <= 4096);
-    assert.doesNotMatch(body, /13:30|20:30|diciembre de 2026 está/);
     const doc = sent.find((message) => message.kind === 'document' && message.to === '34600000140');
     assert.ok(doc);
     assert.equal(doc.filename, 'Carta Barra Navidad 2026 - Don Fadrique.pdf');
     assert.match(doc.link, /\/carta_barra_navidad_2026\.pdf$/);
-    assert.equal(messages.at(-1).buttons.map((button) => button.id).join(','), 'barra_book,barra_later');
+    assert.equal(messages[0].kind, 'text');
+    assert.ok(messages.some((message) => message.kind === 'document'));
+    assert.equal(messages.at(-1).buttons.map((button) => button.title).join(','), 'Reservar,Tengo otra pregunta');
+    assert.equal(sessions.get('34600000140').step, 'BARRA');
+  });
+
+  it('qué hay, en qué consiste, carta y precios contestan con la carta y no piden fecha', async () => {
+    const phone = '34600000147';
+    await say(phone, 'barra de navidad');
+    let body = joined(await say(phone, '¿qué hay?'));
+    assert.match(body, /Nuestra Gilda · 5,50 €/);
+    assert.match(body, /Croquetas de Jamón \(ud\) · 2,00 €/);
+    assert.match(body, /Fino Tradición · 5,00 €/);
+    assert.match(body, /Precios con IVA incluido/);
+    assert.doesNotMatch(body, /Para qué día|No entendí la fecha/);
+    assert.equal(sessions.get(phone).step, 'BARRA');
+
+    body = joined(await say(phone, '¿en qué consiste?'));
+    assert.match(body, /Para picar/);
+    assert.match(body, /Champagne desde 65,00 €/);
+    assert.match(body, /Consulta nuestras carnes a la brasa/);
+    assert.doesNotMatch(body, /Para qué día/);
+
+    const before = sent.length;
+    body = joined(await say(phone, 'la carta'));
+    assert.match(body, /Plato de Cuchara del Día · Consultar/);
+    assert.ok(sent.slice(before).some((message) => message.kind === 'document' && message.to === phone));
+
+    body = joined(await say(phone, 'precios'));
+    assert.match(body, /Díscolo Blanco · 4,80 €/);
+    assert.match(body, /Albóndigas de Jabalí · Media Ración · 4,00 €/);
+    assert.doesNotMatch(body, /24,00 €|Dom Pérignon|Para qué día/);
   });
 
   it('detecta tapas, gilda y wine by the glass, y no el menú del 25', async () => {
@@ -1772,6 +1796,10 @@ describe('Barra de Navidad', () => {
 
   it('reserva la barra con día, hora y personas, y avisa como las demás', async () => {
     await say('34600000145', 'croquetas');
+    const noted = joined(await say('34600000145', 'alergia al gluten'));
+    assert.match(noted, /Lo anoto: alergia al gluten/);
+    assert.doesNotMatch(noted, /Para qué día/);
+    assert.equal(sessions.get('34600000145').step, 'BARRA');
     await say('34600000145', 'Reservar', 'barra_book');
     let body = joined(await say('34600000145', '15/11'));
     assert.match(body, /qué hora/i);
@@ -1787,6 +1815,7 @@ describe('Barra de Navidad', () => {
     assert.equal(saved.partySize, 3);
     assert.equal(saved.time, '14:00');
     assert.match(saved.details, /Barra de Navidad 2026/);
+    assert.match(saved.details, /alergia al gluten/);
     const admin = sent.filter((message) => message.to === '34699999999').at(-1);
     assert.match(admin.body, /BARRA DE NAVIDAD/);
     assert.match(admin.body, /Nuria Sol/);
@@ -1797,7 +1826,8 @@ describe('Barra de Navidad', () => {
   it('si el PDF no sale, el texto de la carta sí llega', async () => {
     failDocument = true;
     const messages = await say('34600000146', 'picar');
-    assert.match(joined(messages), /Precios con IVA incluido/);
+    assert.match(joined(messages), /Imprescindible reservar/);
+    assert.match(joined(messages), /tapas/);
     assert.equal(sent.filter((message) => message.kind === 'document' && message.to === '34600000146').length, 0);
   });
 });
