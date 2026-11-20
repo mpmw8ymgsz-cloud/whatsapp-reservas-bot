@@ -882,21 +882,48 @@ async function handleConfirmStep(from, buttonId, session, text) {
 
 // ---------- Comandos de administrador ----------
 
+async function loadPendingReservations() {
+  try {
+    if (typeof db.listPendingReservations === 'function') return await db.listPendingReservations();
+    if (typeof db.getPendingEventRequests === 'function') return await db.getPendingEventRequests();
+  } catch (err) {
+    console.error('[admin] no se pudo leer las pendientes:', err.message);
+  }
+  return [];
+}
+
 async function handleAdmin(from, normText, rawText) {
   if (['hoy', 'reservas hoy'].includes(normText)) return sendAdminList(from, 0);
   if (['manana', 'reservas manana'].includes(normText)) return sendAdminList(from, 1);
   if (['semana', 'reservas semana'].includes(normText)) return sendAdminList(from, 7);
 
   const parsed = confirmacion.parseAdminDecision(rawText);
-  if (!parsed) return wa.sendText(from, confirmacion.adminHelp());
-
-  try {
-    const result = await applyDecision(parsed);
-    await wa.sendText(from, result.adminText);
-  } catch (err) {
-    console.error('[decision]', err.message);
-    await wa.sendText(from, 'No he podido actualizar esa solicitud. Prueba de nuevo o usa el panel.');
+  if (parsed) {
+    try {
+      const result = await applyDecision(parsed);
+      await wa.sendText(from, result.adminText);
+    } catch (err) {
+      console.error('[decision]', err.message);
+      await wa.sendText(from, 'No he podido actualizar esa solicitud. Prueba de nuevo o usa el panel.');
+    }
+    return;
   }
+
+  const pending = await loadPendingReservations();
+  const mentioned = confirmacion.referencedRequestId(rawText);
+  if (mentioned) {
+    const hit = pending.find((row) => Number(row.id) === mentioned);
+    const body = hit
+      ? confirmacion.pendingListMessage([hit])
+      : confirmacion.missingRequestText(mentioned, pending);
+    await wa.sendText(from, body);
+    return;
+  }
+  if (confirmacion.isPendingQuery(normText)) {
+    await wa.sendText(from, confirmacion.pendingListMessage(pending));
+    return;
+  }
+  await wa.sendText(from, confirmacion.adminHelp(pending));
 }
 
 async function sendAdminList(from, daysAhead) {
@@ -934,7 +961,8 @@ async function sendAdminList(from, daysAhead) {
       msg += `${typeIcon(r.type)} #${r.id} ${r.date} ${r.time} · ${r.name}${r.party_size ? ' · ' + r.party_size + 'p' : ''}${r.details ? ' · ' + r.details : ''} · 📱${r.phone}\n`;
     }
   }
-  msg += `\n_Comandos: "hoy", "mañana", "semana". Para una solicitud: OK 123 o NO 123 motivo._`;
+  msg += `\n${confirmacion.pendingCommandText(pendingSource)}`;
+  msg += `\n_Comandos: "hoy", "mañana", "semana"._`;
   await wa.sendText(from, msg);
 }
 

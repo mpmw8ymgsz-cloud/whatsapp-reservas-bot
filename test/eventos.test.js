@@ -1589,8 +1589,9 @@ describe('confirmación de Nico', () => {
 
   it('el WhatsApp de administración no entra en el flujo del cliente', async () => {
     let messages = await say(ADMIN, 'quiero una mesa');
-    assert.match(joined(messages), /OK 123/);
-    assert.match(joined(messages), /NO 123/);
+    assert.match(joined(messages), /No hay ninguna solicitud pendiente ahora mismo/);
+    assert.match(joined(messages), /Cuando llegue una, te diré su número para responder OK o NO/);
+    assert.doesNotMatch(joined(messages), /OK 123|NO 123/);
     assert.doesNotMatch(joined(messages), /qué día/i);
     assert.equal(sessions.has(ADMIN), false);
     assert.equal(reservations.length, 0);
@@ -1598,6 +1599,28 @@ describe('confirmación de Nico', () => {
     messages = await say('+34 699 999 999', 'hola');
     assert.match(joined(messages), /administración/);
     assert.equal(messages.some((message) => message.kind === 'buttons'), false);
+  });
+
+  it('«¿hay alguna solicitud pendiente?» lista las reales, y un número inventado no se confirma', async () => {
+    const row = seed({ name: 'Nuria Sol', date: '2026-11-15', time: '14:00' });
+    let body = joined(await say(ADMIN, '¿Hay alguna solicitud pendiente??'));
+    assert.match(body, new RegExp(`#${row.id}`));
+    assert.match(body, new RegExp(`OK ${row.id}`));
+    assert.match(body, /Nuria Sol/);
+    assert.doesNotMatch(body, /OK 123/);
+
+    body = joined(await say(ADMIN, 'pendientes'));
+    assert.match(body, new RegExp(`#${row.id}`));
+
+    body = joined(await say(ADMIN, 'No he visto la solicitud 123'));
+    assert.match(body, /No existe la solicitud #123/);
+    assert.match(body, new RegExp(`Para confirmar la #${row.id} escribe OK ${row.id}`));
+    assert.equal(reservations.find((item) => item.id === row.id).status, 'pending');
+
+    body = joined(await say(ADMIN, 'OK 123'));
+    assert.match(body, /No existe la solicitud #123/);
+    assert.match(body, new RegExp(`#${row.id}`));
+    assert.equal(reservations.find((item) => item.id === row.id).status, 'pending');
   });
 
   it('OK con el código confirma y avisa al cliente dentro de las 24 h', async () => {

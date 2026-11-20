@@ -11,6 +11,7 @@ const {
   adminNotDelivered,
   decisionResult,
   isWeddingVisitRequest,
+  missingRequestText,
 } = require('./confirmacion');
 
 function customerText(row, status) {
@@ -66,7 +67,13 @@ async function applyDecision({ id, action, reason } = {}) {
 
   const row = await db.getReservation(targetId);
   if (!row) {
-    return decisionResult(404, `No encuentro la solicitud #${targetId}.`, { id: targetId, code: String(targetId) });
+    let pending = [];
+    try {
+      pending = typeof db.listPendingReservations === 'function' ? await db.listPendingReservations() : [];
+    } catch (err) {
+      pending = [];
+    }
+    return decisionResult(404, missingRequestText(targetId, pending), { id: targetId, code: String(targetId) });
   }
   if (row.status !== 'pending') {
     const estado = estadoOf(row.status);

@@ -8,6 +8,7 @@ const { privacyHtml } = require('./privacyPage');
 const menusPaginas = require('./menusPaginas');
 const weddingSources = require('./weddingSources');
 const conversationLog = require('./conversationLog');
+const confirmacion = require('./confirmacion');
 
 function extractText(message) {
   if (message.type === 'image') return (message.image && message.image.caption) || '';
@@ -439,7 +440,8 @@ function renderAdminPage({ businessName, confirmed, pending, rejected, statuses,
   </table>
   <h2>Solicitudes de boda, empresa y congresos · pendientes de presupuesto</h2>
   <p>${pendingLabel}, también fuera de los 30 días. Aquí salen también las mesas, menús y habitaciones que aún no has confirmado.</p>
-  <p>Por WhatsApp: <strong>OK 123</strong> confirma y <strong>NO 123 motivo</strong> rechaza. Si solo hay una pendiente, basta con OK o NO.</p>
+  <p>${esc(confirmacion.pendingCommandText(pendingList)).replace(/\n/g, '<br>')}</p>
+  <p>Si solo hay una pendiente, basta con OK o NO.</p>
   ${failedNote}
   <table>
     <tr><th>Nº</th><th>Fecha</th><th>Servicio</th><th>Tipo</th><th>Contacto</th><th>Pers.</th><th>Detalles</th><th>WhatsApp</th><th>Estado</th>${actionHeader}</tr>
