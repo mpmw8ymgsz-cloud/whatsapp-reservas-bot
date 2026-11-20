@@ -249,20 +249,74 @@ function customerRejected(row) {
 
 function adminInstructions(id) {
   return [
-    `Para confirmar responde OK ${id}`,
-    `Para rechazar responde NO ${id} y, si quieres, un motivo. Ejemplo: NO ${id} no hay hueco`,
+    `Para confirmar la #${id} escribe OK ${id}`,
+    `Para rechazarla, NO ${id} y el motivo. Ejemplo: NO ${id} no hay hueco`,
     'Si solo hay una solicitud pendiente, basta con OK o con NO.',
   ].join('\n');
 }
 
-function adminHelp() {
+function pendingRows(pending) {
+  return (Array.isArray(pending) ? pending : []).filter((row) => row && row.id != null && String(row.id).trim() !== '');
+}
+
+function pendingCommandText(pending) {
+  const rows = pendingRows(pending);
+  if (rows.length === 0) {
+    return [
+      'No hay ninguna solicitud pendiente ahora mismo.',
+      'Cuando llegue una, te diré su número para responder OK o NO.',
+    ].join('\n');
+  }
+  return rows
+    .slice(0, 8)
+    .map((row) => `Para confirmar la #${row.id} escribe OK ${row.id}; para rechazarla, NO ${row.id} y el motivo.`)
+    .join('\n');
+}
+
+function pendingListMessage(pending) {
+  const rows = pendingRows(pending);
+  if (rows.length === 0) return pendingCommandText(rows);
+  const lines = rows.slice(0, 12).map((row) => {
+    const who = row.name ? String(row.name).trim() : 'sin nombre';
+    const when = [row.date, row.time].filter(Boolean).join(' ');
+    const people = row.party_size || row.partySize;
+    return [`#${row.id}`, when, who, people ? `${people}p` : ''].filter(Boolean).join(' · ');
+  });
+  const more = rows.length > 12 ? `\n… y ${rows.length - 12} más.` : '';
+  return `Solicitudes pendientes (${rows.length}):\n${lines.join('\n')}${more}\n\n${pendingCommandText(rows)}`;
+}
+
+function missingRequestText(id, pending) {
+  return `No existe la solicitud #${id}.\n\n${pendingCommandText(pending)}`;
+}
+
+function isPendingQuery(norm) {
+  const text = String(norm || '')
+    .replace(/[¿?¡!.,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return false;
+  if (/^pendientes?$/.test(text)) return true;
+  if (/que hay pendiente/.test(text)) return true;
+  if (/hay alguna solicitud/.test(text)) return true;
+  if (/\bpendientes?\b/.test(text) && /solicitud|hay|queda|tienes|ver|alguna|dime|cuales?/.test(text)) return true;
+  return false;
+}
+
+function referencedRequestId(text) {
+  const raw = String(text || '');
+  const labeled = raw.match(/(?:solicitud|petici[oó]n)\s*#?\s*(\d+)/i);
+  if (labeled) return Number(labeled[1]);
+  return null;
+}
+
+function adminHelp(pending) {
   return [
     'Este número es el de administración. No entra en el flujo de reservas.',
     '',
-    'OK 123 — confirmar la solicitud 123',
-    'NO 123 motivo — rechazarla (el motivo es opcional)',
-    'OK o NO — si solo hay una pendiente',
-    'hoy, mañana, semana — ver la lista',
+    pendingCommandText(pending),
+    'Si solo hay una pendiente, basta con OK o con NO.',
+    'hoy, mañana, semana — ver la lista por fechas.',
   ].join('\n');
 }
 
@@ -315,6 +369,11 @@ module.exports = {
   customerRejected,
   isWeddingVisitRequest,
   adminInstructions,
+  pendingCommandText,
+  pendingListMessage,
+  missingRequestText,
+  isPendingQuery,
+  referencedRequestId,
   adminHelp,
   adminDelivered,
   adminNotDelivered,

@@ -22,11 +22,38 @@ const {
   customerConfirmed,
   customerRejected,
   adminInstructions,
+  adminHelp,
+  pendingCommandText,
+  isPendingQuery,
   adminNotDelivered,
 } = require('../src/confirmacion');
 const { createApp, renderAdminPage } = require('../src/server-meta');
 
 const PERSONAL = /650\s*488\s*113|661\s*724\s*158|650488113|661724158|34650488113|34661724158/;
+
+describe('texto de administración sin números de ejemplo', () => {
+  it('sin pendientes no inventa un número', () => {
+    const text = pendingCommandText([]);
+    assert.match(text, /No hay ninguna solicitud pendiente ahora mismo/);
+    assert.match(text, /Cuando llegue una, te diré su número para responder OK o NO/);
+    assert.doesNotMatch(text, /123/);
+    assert.doesNotMatch(adminHelp([]), /123/);
+  });
+
+  it('con una pendiente usa ese número', () => {
+    const text = pendingCommandText([{ id: 22, name: 'Ana', date: '2026-12-01' }]);
+    assert.match(text, /Para confirmar la #22 escribe OK 22; para rechazarla, NO 22 y el motivo/);
+    assert.doesNotMatch(text, /123/);
+  });
+
+  it('reconoce la pregunta en lenguaje natural', () => {
+    assert.equal(isPendingQuery('¿hay alguna solicitud pendiente??'), true);
+    assert.equal(isPendingQuery('pendientes'), true);
+    assert.equal(isPendingQuery('que hay pendiente'), true);
+    assert.equal(isPendingQuery('ok 22'), false);
+    assert.equal(isPendingQuery('hoy'), false);
+  });
+});
 
 describe('órdenes de Nico', () => {
   const cases = [
@@ -247,9 +274,19 @@ describe('panel y endpoints', () => {
     });
     assert.match(plain, /Solicitudes de boda, empresa y congresos/);
     assert.match(plain, /Pendiente de presupuesto/);
-    assert.match(plain, /OK 123/);
-    assert.match(plain, /NO 123 motivo/);
+    assert.match(plain, /Para confirmar la #9 escribe OK 9/);
+    assert.match(plain, /NO 9 y el motivo/);
+    assert.doesNotMatch(plain, /OK 123|NO 123/);
     assert.doesNotMatch(plain, /<form/);
+
+    const empty = renderAdminPage({
+      businessName: 'Hostería Don Fadrique',
+      confirmed: [],
+      pending: [],
+      statuses: [],
+    });
+    assert.match(empty, /No hay ninguna solicitud pendiente ahora mismo/);
+    assert.doesNotMatch(empty, /OK 123|NO 123/);
 
     const withKey = renderAdminPage({
       businessName: 'Hostería Don Fadrique',
